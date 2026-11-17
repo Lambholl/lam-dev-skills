@@ -1,0 +1,10 @@
+{
+  "script": "scripts/hooks/dev-writing-hook.mjs",
+  "events": [
+    {
+      "event": "PostToolUse",
+      "matcher": { "claude": "Write|Edit|MultiEdit|NotebookEdit", "codex": "apply_patch" },
+      "statusMessage": "Checking document"
+    }
+  ]
+}

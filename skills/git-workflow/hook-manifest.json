@@ -1,0 +1,10 @@
+{
+  "script": "scripts/hooks/git-workflow-hook.mjs",
+  "events": [
+    {
+      "event": "PreToolUse",
+      "matcher": { "claude": "Bash|PowerShell", "codex": "Bash" },
+      "statusMessage": "Checking commit message"
+    }
+  ]
+}
