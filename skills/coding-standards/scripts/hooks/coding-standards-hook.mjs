@@ -5,7 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const REMINDER =
-  '注释自查（coding-standards 技能“注释”一节，本会话没读过就先读）：注释用项目约定的语言；文档注释只写当前符号对外的契约，不写调用方、实现和架构；行内注释写原因和后果，不复述代码，不写代码没做的事；不写工单号和给评审者的自证。有问题就改，没有就继续。';
+  '注释自查（coding-standards 技能“注释”一节，本会话没读过就先读）：注释用项目约定的语言；文档注释只写当前符号对外的契约，不写调用方、实现和架构；行内注释写原因和后果，不复述代码，不写代码没做的事；不写工单号和多余的免责解释。有问题就改，没有就继续。';
 
 // 文档和数据文件不按源码检查。
 const NON_CODE_FILE = /\.(md|mdx|markdown|txt|json|jsonc|lock|csv|tsv|log|svg)$/i;
