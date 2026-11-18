@@ -48,3 +48,14 @@ test('没有记忆目录或事件不支持时不输出', () => {
   fs.rmSync(empty, { recursive: true, force: true });
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('Antigravity SessionStart 和 PreInvocation 输出 injectSteps，多轮后续调用不重复注入', () => {
+  const root = makeProject();
+  const start = JSON.parse(runHook({ conversationId: 'c1', hookEventName: 'SessionStart', workspacePaths: [root] }).stdout);
+  assert.ok(start.injectSteps[0].systemMessage.systemMessage.includes(path.join(root, '.project-memory', 'INDEX.md')));
+  const firstTurn = JSON.parse(runHook({ conversationId: 'c1', hookEventName: 'PreInvocation', invocationNum: 1, cwd: root }).stdout);
+  assert.match(firstTurn.injectSteps[0].systemMessage.systemMessage, /项目记忆入口/);
+  const secondTurn = JSON.parse(runHook({ conversationId: 'c1', hookEventName: 'PreInvocation', invocationNum: 2, cwd: root }).stdout);
+  assert.deepEqual(secondTurn, {});
+  fs.rmSync(root, { recursive: true, force: true });
+});

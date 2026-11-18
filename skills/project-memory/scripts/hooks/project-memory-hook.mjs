@@ -48,8 +48,21 @@ async function readStdin() {
 
 async function main() {
   const input = JSON.parse(await readStdin());
-  const memoryRoot = findMemoryRoot(input.cwd ?? process.cwd());
-  if (!memoryRoot) return;
+  const isAntigravity = input.hook_event_name === undefined && (input.hookEventName !== undefined || input.conversationId !== undefined || input.workspacePaths !== undefined);
+  const startDir = input.cwd ?? input.workspacePaths?.[0] ?? process.cwd();
+  const memoryRoot = findMemoryRoot(startDir);
+  if (!memoryRoot) {
+    if (isAntigravity) process.stdout.write('{}');
+    return;
+  }
+  if (isAntigravity) {
+    const eventName = input.hookEventName ?? (input.invocationNum !== undefined ? 'PreInvocation' : 'SessionStart');
+    const context = eventName === 'SessionStart' ? sessionProtocol(memoryRoot)
+      : eventName === 'PreInvocation' && (input.invocationNum == null || input.invocationNum <= 1) ? promptReminder(memoryRoot)
+      : null;
+    process.stdout.write(JSON.stringify(context ? { injectSteps: [{ systemMessage: { systemMessage: context } }] } : {}));
+    return;
+  }
   const eventName = input.hook_event_name;
   const context = eventName === 'SessionStart' ? sessionProtocol(memoryRoot)
     : eventName === 'UserPromptSubmit' ? promptReminder(memoryRoot)

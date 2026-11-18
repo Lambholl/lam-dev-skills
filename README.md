@@ -1,6 +1,6 @@
 # Lambholl's Development Skills
 
-给 Claude Code 和 Codex 用的四个开发技能：写文档、写提交信息、写代码和维护项目记忆。每个技能带一个 Hook，在 Agent 写文档、写注释、提交和开新会话时提醒它按技能自查。
+给 Claude Code、Codex 和 Antigravity 用的四个开发技能：写文档、写提交信息、写代码和维护项目记忆。每个技能带一个 Hook，在 Agent 写文档、写注释、提交和开新会话时提醒它按技能自查。
 
 ## 技能
 
@@ -24,7 +24,13 @@ cd lam-dev-skills
 node scripts/install.mjs install
 ```
 
-`install` 把每个技能链接到 `~/.claude/skills/`（有 `~/.codex/` 时也链接到 `~/.codex/skills/`），再把 Hook 合并进 `~/.claude/settings.json` 和 `~/.codex/hooks.json`。配置里已有的其他 Hook 和设置不动，改之前先备份成 `<文件>.bak-<时间>`。
+`install` 把每个技能链接到对应平台的用户级技能目录，再把 Hook 合并进用户级配置。配置里已有的其他 Hook 和设置不动，改之前先备份成 `<文件>.bak-<时间>`。
+
+| 平台参数 | 工具 | 技能目录 | Hook 配置与支持范围 |
+| --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude/skills/` | `~/.claude/settings.json`（全部 4 个技能） |
+| `codex` | Codex | `~/.codex/skills/` | `~/.codex/hooks.json`（全部 4 个技能） |
+| `agy` | Antigravity | `~/.gemini/config/skills/` | `~/.gemini/config/hooks.json`（`git-workflow`、`project-memory`；Antigravity 不支持 `PostToolUse` 注入上下文） |
 
 技能是链接，`git pull` 后直接生效。Hook 命令写的是仓库的绝对路径，要移动仓库时先 `uninstall`，移好后再 `install`。
 
@@ -36,9 +42,10 @@ Codex 对新加或改过的 Hook 要先信任才执行。安装后在 Codex 里�
 # 先看会改什么，不写文件
 node scripts/install.mjs install --dry-run
 
-# 只装到某个平台；默认 all，即 home 目录下已有 .claude 或 .codex 的平台
+# 只装到某个平台；默认 all，即 home 目录下已有对应配置目录的平台
 node scripts/install.mjs install --platform claude
 node scripts/install.mjs install --platform codex
+node scripts/install.mjs install --platform antigravity
 
 # 查看每个技能的链接和 Hook 状态
 node scripts/install.mjs status

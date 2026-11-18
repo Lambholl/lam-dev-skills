@@ -2,6 +2,6 @@
   "script": "scripts/hooks/project-memory-hook.mjs",
   "events": [
     { "event": "SessionStart", "statusMessage": "Loading project memory" },
-    { "event": "UserPromptSubmit", "statusMessage": "Loading project memory" }
+    { "event": "UserPromptSubmit", "platformEvent": { "antigravity": "PreInvocation" }, "statusMessage": "Loading project memory" }
   ]
 }

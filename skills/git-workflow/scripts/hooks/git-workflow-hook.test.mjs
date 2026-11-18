@@ -90,3 +90,29 @@ test('输入不是 JSON 时报错但不拦截', () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /git-workflow hook:/);
 });
+
+test('Antigravity PreToolUse 首次提交返回 deny JSON，重试返回 allow JSON', () => {
+  const conversationId = `agy-${process.pid}-${Date.now()}`;
+  const input = {
+    conversationId,
+    hookEventName: 'PreToolUse',
+    toolCall: { name: 'run_command', args: { CommandLine: 'git commit -m "fix: x"' } }
+  };
+  const first = runHook(input);
+  assert.equal(first.status, 0);
+  const firstOut = JSON.parse(first.stdout);
+  assert.equal(firstOut.decision, 'deny');
+  assert.match(firstOut.reason, /提交信息自查/);
+
+  const retry = runHook(input);
+  assert.equal(retry.status, 0);
+  assert.deepEqual(JSON.parse(retry.stdout), { decision: 'allow' });
+
+  const other = runHook({
+    conversationId,
+    hookEventName: 'PreToolUse',
+    toolCall: { name: 'run_command', args: { CommandLine: 'git status' } }
+  });
+  assert.equal(other.status, 0);
+  assert.deepEqual(JSON.parse(other.stdout), { decision: 'allow' });
+});

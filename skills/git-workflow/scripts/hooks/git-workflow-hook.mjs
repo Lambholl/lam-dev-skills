@@ -28,9 +28,9 @@ const GH_PR = new RegExp(`${SEGMENT_PREFIX}gh(?:\\.exe)?\\s+pr\\s+(?:create|edit
 const MESSAGE_FLAG =
   /(?:^|\s)(?:--body-file|--message|--title|--body|--file|-[a-zA-Z]*m|-[tbF])(?:=|[ \t]+)?(?:"((?:[^"\\]|\\[\s\S])*)"|'([^']*)'|([^\s;&|]+))/g;
 
-/** 返回 Bash 或 PowerShell 工具输入里的命令文字；Codex 可能把命令写成参数数组。 */
+/** 返回 Bash、PowerShell 或 run_command 工具输入里的命令文字；Codex 可能把命令写成参数数组。 */
 export function commandText(toolInput) {
-  const command = toolInput.command ?? toolInput.cmd ?? '';
+  const command = toolInput.command ?? toolInput.cmd ?? toolInput.CommandLine ?? '';
   return Array.isArray(command) ? command.join(' ') : String(command);
 }
 
@@ -108,9 +108,22 @@ async function readStdin() {
 
 async function main() {
   const input = JSON.parse(await readStdin());
-  const command = commandText(input.tool_input ?? {});
-  if (!isCommitCommand(command)) return;
-  if (!isFirstAttempt(input.session_id ?? 'unknown', commitIdentity(command))) return;
+  const isAntigravity = Boolean(input.toolCall) || input.hookEventName === 'PreToolUse';
+  const toolInput = isAntigravity ? (input.toolCall?.args ?? {}) : (input.tool_input ?? {});
+  const command = commandText(toolInput);
+  if (!isCommitCommand(command)) {
+    if (isAntigravity) process.stdout.write(JSON.stringify({ decision: 'allow' }));
+    return;
+  }
+  const sessionId = input.session_id ?? input.conversationId ?? 'unknown';
+  if (!isFirstAttempt(sessionId, commitIdentity(command))) {
+    if (isAntigravity) process.stdout.write(JSON.stringify({ decision: 'allow' }));
+    return;
+  }
+  if (isAntigravity) {
+    process.stdout.write(JSON.stringify({ decision: 'deny', reason: REMINDER }));
+    return;
+  }
   // 退出码 2 让 Claude Code 和 Codex 拦下这次调用，并把 stderr 交给 Agent。
   process.stderr.write(REMINDER);
   process.exitCode = 2;

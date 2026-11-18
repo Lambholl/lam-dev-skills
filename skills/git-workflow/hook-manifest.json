@@ -3,7 +3,7 @@
   "events": [
     {
       "event": "PreToolUse",
-      "matcher": { "claude": "Bash|PowerShell", "codex": "Bash" },
+      "matcher": { "claude": "Bash|PowerShell", "codex": "Bash", "antigravity": "run_command" },
       "statusMessage": "Checking commit message"
     }
   ]
