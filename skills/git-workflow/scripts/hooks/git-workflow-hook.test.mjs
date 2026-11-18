@@ -91,11 +91,11 @@ test('输入不是 JSON 时报错但不拦截', () => {
   assert.match(result.stderr, /git-workflow hook:/);
 });
 
+// Antigravity 的输入字段和拦截方式都和上面不同（stdout 的 decision，不是退出码 2），这条覆盖那个分支。
 test('Antigravity PreToolUse 首次提交返回 deny JSON，重试返回 allow JSON', () => {
   const conversationId = `agy-${process.pid}-${Date.now()}`;
   const input = {
     conversationId,
-    hookEventName: 'PreToolUse',
     toolCall: { name: 'run_command', args: { CommandLine: 'git commit -m "fix: x"' } }
   };
   const first = runHook(input);
@@ -110,7 +110,6 @@ test('Antigravity PreToolUse 首次提交返回 deny JSON，重试返回 allow J
 
   const other = runHook({
     conversationId,
-    hookEventName: 'PreToolUse',
     toolCall: { name: 'run_command', args: { CommandLine: 'git status' } }
   });
   assert.equal(other.status, 0);

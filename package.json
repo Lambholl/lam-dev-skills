@@ -8,7 +8,6 @@
   "scripts": {
     "test": "node --test",
     "install-skills": "node scripts/install.mjs install",
-    "install-antigravity": "node scripts/install.mjs install --platform antigravity",
     "status": "node scripts/install.mjs status"
   }
 }

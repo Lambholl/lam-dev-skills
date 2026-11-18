@@ -49,13 +49,17 @@ test('没有记忆目录或事件不支持时不输出', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('Antigravity SessionStart 和 PreInvocation 输出 injectSteps，多轮后续调用不重复注入', () => {
+// Antigravity 的输入没有事件名和 cwd，输出用 injectSteps，这条覆盖那个分支。
+test('Antigravity SessionStart 和 PreInvocation 输出 injectSteps，同一轮后续调用不重复注入', () => {
   const root = makeProject();
-  const start = JSON.parse(runHook({ conversationId: 'c1', hookEventName: 'SessionStart', workspacePaths: [root] }).stdout);
+  const workspacePaths = [path.join(root, 'src')];
+  const start = JSON.parse(runHook({ conversationId: 'c1', workspacePaths }).stdout);
   assert.ok(start.injectSteps[0].systemMessage.systemMessage.includes(path.join(root, '.project-memory', 'INDEX.md')));
-  const firstTurn = JSON.parse(runHook({ conversationId: 'c1', hookEventName: 'PreInvocation', invocationNum: 1, cwd: root }).stdout);
-  assert.match(firstTurn.injectSteps[0].systemMessage.systemMessage, /项目记忆入口/);
-  const secondTurn = JSON.parse(runHook({ conversationId: 'c1', hookEventName: 'PreInvocation', invocationNum: 2, cwd: root }).stdout);
-  assert.deepEqual(secondTurn, {});
+  const firstCall = JSON.parse(runHook({ conversationId: 'c1', workspacePaths, invocationNum: 0 }).stdout);
+  assert.match(firstCall.injectSteps[0].systemMessage.systemMessage, /项目记忆入口/);
+  assert.deepEqual(JSON.parse(runHook({ conversationId: 'c1', workspacePaths, invocationNum: 1 }).stdout), {});
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-hook-empty-'));
+  assert.deepEqual(JSON.parse(runHook({ conversationId: 'c1', workspacePaths: [empty] }).stdout), {});
+  fs.rmSync(empty, { recursive: true, force: true });
   fs.rmSync(root, { recursive: true, force: true });
 });
