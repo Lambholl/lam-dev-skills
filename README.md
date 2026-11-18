@@ -45,7 +45,7 @@ node scripts/install.mjs install --dry-run
 # 只装到某个平台；默认 all，即 home 目录下已有对应配置目录的平台
 node scripts/install.mjs install --platform claude
 node scripts/install.mjs install --platform codex
-node scripts/install.mjs install --platform antigravity
+node scripts/install.mjs install --platform agy
 
 # 查看每个技能的链接和 Hook 状态
 node scripts/install.mjs status

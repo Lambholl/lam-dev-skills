@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 把本仓库的技能链接到 Claude Code、Codex、Antigravity 的用户级技能目录，并把各技能的 Hook 合并进用户级配置。
-// 用法：node scripts/install.mjs install|status|uninstall [--platform all|claude|codex|antigravity] [--dry-run]
+// 用法：node scripts/install.mjs install|status|uninstall [--platform all|claude|codex|agy] [--dry-run]
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,26 +16,22 @@ export const PLATFORMS = {
     label: 'Claude Code',
     skillsDir: '.claude/skills',
     config: '.claude/settings.json',
-    hookFormat: 'claude',
     detect: (home) => fs.existsSync(path.join(home, '.claude'))
   },
   codex: {
     label: 'Codex',
     skillsDir: '.codex/skills',
     config: '.codex/hooks.json',
-    hookFormat: 'codex',
     detect: (home) => fs.existsSync(path.join(home, '.codex'))
   },
-  antigravity: {
+  agy: {
     label: 'Antigravity',
     skillsDir: '.gemini/config/skills',
     config: '.gemini/config/hooks.json',
-    hookFormat: 'antigravity',
     detect: (home) => fs.existsSync(path.join(home, '.gemini', 'config')) || fs.existsSync(path.join(home, '.gemini', 'antigravity'))
   }
 };
 
-const PLATFORM_ALIASES = { agy: 'antigravity' };
 const HOOK_TIMEOUT_SECONDS = 10;
 
 function toPosix(value) {
@@ -64,9 +60,8 @@ export function listSkills(repoRoot = REPO_ROOT) {
 export function selectPlatforms(value, home) {
   if (value === 'all') return Object.keys(PLATFORMS).filter((name) => PLATFORMS[name].detect(home));
   const selected = [];
-  for (const raw of String(value).split(',').map((item) => item.trim()).filter(Boolean)) {
-    const name = PLATFORM_ALIASES[raw] ?? raw;
-    if (!PLATFORMS[name]) throw new Error(`不支持的平台：${raw}，可选 all、${Object.keys(PLATFORMS).join('、')}`);
+  for (const name of String(value).split(',').map((item) => item.trim()).filter(Boolean)) {
+    if (!PLATFORMS[name]) throw new Error(`不支持的平台：${name}，可选 all、${Object.keys(PLATFORMS).join('、')}`);
     if (!selected.includes(name)) selected.push(name);
   }
   if (!selected.length) throw new Error(`不支持的平台：${value}，可选 all、${Object.keys(PLATFORMS).join('、')}`);
@@ -133,7 +128,7 @@ function removeOwnAntigravityHooks(config, repoRoot) {
 
 /** 从配置里删掉本仓库的 Hook，其他 Hook 原样保留，返回新配置。 */
 export function removeOwnHooks(config, repoRoot = REPO_ROOT, platform = 'claude') {
-  if (platform === 'antigravity') return removeOwnAntigravityHooks(config, repoRoot);
+  if (platform === 'agy') return removeOwnAntigravityHooks(config, repoRoot);
   const next = structuredClone(config);
   const hooks = next.hooks ?? {};
   for (const event of Object.keys(hooks)) {
@@ -150,16 +145,16 @@ export function removeOwnHooks(config, repoRoot = REPO_ROOT, platform = 'claude'
 
 /** 先删掉本仓库已有的 Hook，再按各技能的 hook-manifest.json 加回，返回新配置。 */
 export function mergeHooks(config, platform, skills, repoRoot = REPO_ROOT) {
-  if (platform === 'antigravity') {
+  if (platform === 'agy') {
     const next = removeOwnAntigravityHooks(config, repoRoot);
     const spec = {};
     for (const skill of skills) {
       for (const event of skill.manifest?.events ?? []) {
         if (!skillSupportsEvent(event, platform)) continue;
-        const eventName = event.platformEvent?.antigravity ?? event.event;
+        const eventName = event.platformEvent?.[platform] ?? event.event;
         const handler = hookHandler(platform, skill, event);
         if (event.matcher) {
-          (spec[eventName] ??= []).push({ matcher: event.matcher.antigravity, hooks: [handler] });
+          (spec[eventName] ??= []).push({ matcher: event.matcher[platform], hooks: [handler] });
         } else {
           (spec[eventName] ??= []).push(handler);
         }
@@ -246,7 +241,7 @@ function configFile(home, platform) {
 }
 
 function collectHandlers(config, platform) {
-  if (PLATFORMS[platform].hookFormat === 'antigravity') {
+  if (platform === 'agy') {
     const handlers = [];
     for (const spec of Object.values(config)) {
       if (!spec || typeof spec !== 'object' || Array.isArray(spec)) continue;
@@ -330,7 +325,7 @@ export function status({ home = os.homedir(), platforms, repoRoot = REPO_ROOT, l
       const linkText = { linked: '已链接', missing: '未链接', conflict: '冲突（同名目录不是本仓库的链接）' }[link];
       const hookText = {
         none: '无 Hook',
-        unsupported: 'Antigravity 不支持 PostToolUse 上下文注入',
+        unsupported: `${PLATFORMS[platform].label} 不支持这个 Hook 用的事件`,
         missing: 'Hook 未安装',
         configured: platform === 'codex' ? 'Hook 已写入配置，需在 Codex 里审阅信任' : 'Hook 已写入配置'
       }[hook];

@@ -8,6 +8,20 @@ import { ANTIGRAVITY_HOOK_KEY, REPO_ROOT, install, listSkills, selectPlatforms, 
 
 const SKILLS = ['coding-standards', 'dev-writing', 'git-workflow', 'project-memory'];
 const FOREIGN_HOOK = { matcher: 'Bash', hooks: [{ type: 'command', command: 'node other-hook.mjs' }] };
+// Antigravity 的 hooks.json 顶层是命名的 Hook 组，本仓库的 Hook 写在 ANTIGRAVITY_HOOK_KEY 组里。
+const FOREIGN_AGY_GROUP = { PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'node other-hook.mjs' }] }] };
+const ALL_PLATFORMS = ['claude', 'codex', 'agy'];
+
+function agyDir(home) {
+  return path.join(home, '.gemini', 'config');
+}
+
+function writeForeignHooks(home) {
+  fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ model: 'x', hooks: { PreToolUse: [FOREIGN_HOOK] } }));
+  fs.mkdirSync(agyDir(home), { recursive: true });
+  fs.writeFileSync(path.join(agyDir(home), 'hooks.json'), JSON.stringify({ 'custom-guard': FOREIGN_AGY_GROUP }));
+}
 
 function withHome(fn) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'lam-install-'));
@@ -34,15 +48,15 @@ test('仓库里有四个技能，每个都带 Hook 清单，清单里的脚本�
   for (const skill of skills) assert.ok(fs.existsSync(path.join(skill.dir, skill.manifest.script)), skill.name);
 });
 
-test('all 只选家目录下已有配置目录的平台，支持 antigravity 及其别名 agy', () => {
+test('all 只选家目录下已有配置目录的平台，也可以用逗号指定多个平台', () => {
   withHome((home) => {
     assert.deepEqual(selectPlatforms('all', home), []);
     fs.mkdirSync(path.join(home, '.claude'));
     assert.deepEqual(selectPlatforms('all', home), ['claude']);
-    fs.mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
-    assert.deepEqual(selectPlatforms('all', home), ['claude', 'antigravity']);
-    assert.deepEqual(selectPlatforms('agy', home), ['antigravity']);
-    assert.deepEqual(selectPlatforms('codex,antigravity', home), ['codex', 'antigravity']);
+    fs.mkdirSync(agyDir(home), { recursive: true });
+    assert.deepEqual(selectPlatforms('all', home), ['claude', 'agy']);
+    assert.deepEqual(selectPlatforms('codex', home), ['codex']);
+    assert.deepEqual(selectPlatforms('codex,agy,codex', home), ['codex', 'agy']);
     assert.throws(() => selectPlatforms('codebuddy', home), /不支持的平台/);
   });
 });
@@ -50,14 +64,14 @@ test('all 只选家目录下已有配置目录的平台，支持 antigravity 及
 test('install 链接技能、合并 Hook、保留其他配置并先备份；重复运行不再改动', () => {
   withHome((home) => {
     const claudeDir = path.join(home, '.claude');
-    fs.mkdirSync(claudeDir);
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ model: 'x', hooks: { PreToolUse: [FOREIGN_HOOK] } }));
+    writeForeignHooks(home);
 
-    const result = install({ home, platforms: ['claude', 'codex'], log: quiet });
-    assert.deepEqual(result, { conflicts: [], hooksChanged: { claude: true, codex: true } });
+    const result = install({ home, platforms: ALL_PLATFORMS, log: quiet });
+    assert.deepEqual(result, { conflicts: [], hooksChanged: { claude: true, codex: true, agy: true } });
     for (const name of SKILLS) {
       assert.equal(fs.realpathSync(path.join(claudeDir, 'skills', name)), fs.realpathSync(path.join(REPO_ROOT, 'skills', name)));
       assert.ok(fs.existsSync(path.join(home, '.codex', 'skills', name, 'SKILL.md')));
+      assert.ok(fs.existsSync(path.join(agyDir(home), 'skills', name, 'SKILL.md')));
     }
 
     const claude = readJson(path.join(claudeDir, 'settings.json'));
@@ -77,7 +91,16 @@ test('install 链接技能、合并 Hook、保留其他配置并先备份；重�
     assert.equal(codexCommit.hooks[0].statusMessage, 'Checking commit message');
     assert.equal(codex.hooks.PostToolUse[0].matcher, 'apply_patch');
 
-    assert.deepEqual(install({ home, platforms: ['claude', 'codex'], log: quiet }).hooksChanged, { claude: false, codex: false });
+    const agy = readJson(path.join(agyDir(home), 'hooks.json'));
+    assert.deepEqual(agy['custom-guard'], FOREIGN_AGY_GROUP);
+    const own = agy[ANTIGRAVITY_HOOK_KEY];
+    assert.equal(own.PreToolUse[0].matcher, 'run_command');
+    assert.equal(own.PostToolUse, undefined);
+    assert.equal(own.SessionStart[0].hooks, undefined);
+    assert.equal(own.PreInvocation.length, 1);
+    assert.equal(backups(agyDir(home)).length, 1);
+
+    assert.deepEqual(install({ home, platforms: ALL_PLATFORMS, log: quiet }).hooksChanged, { claude: false, codex: false, agy: false });
     assert.equal(backups(claudeDir).length, 1);
   });
 });
@@ -103,62 +126,38 @@ test('dry-run 不写任何文件', () => {
   });
 });
 
-test('status 列出链接和 Hook，Codex 标出要审阅信任', () => {
+test('status 列出链接和 Hook，Codex 标出要审阅信任，平台不支持的 Hook 事件标为 unsupported', () => {
   withHome((home) => {
     const lines = [];
     assert.deepEqual(status({ home, platforms: ['claude'], log: quiet }).claude['git-workflow'], { link: 'missing', hook: 'missing' });
-    install({ home, platforms: ['claude', 'codex'], log: quiet });
-    const result = status({ home, platforms: ['claude', 'codex'], log: (line) => lines.push(line) });
-    for (const name of SKILLS) assert.deepEqual(result.codex[name], { link: 'linked', hook: 'configured' });
+    install({ home, platforms: ALL_PLATFORMS, log: quiet });
+    const result = status({ home, platforms: ALL_PLATFORMS, log: (line) => lines.push(line) });
+    for (const name of SKILLS) {
+      assert.deepEqual(result.claude[name], { link: 'linked', hook: 'configured' });
+      assert.deepEqual(result.codex[name], { link: 'linked', hook: 'configured' });
+    }
     assert.ok(lines.some((line) => line.includes('git-workflow') && line.includes('需在 Codex 里审阅信任')));
+    // Antigravity 的 PostToolUse 不能给 Agent 注入上下文，两个 PostToolUse Hook 不装。
+    assert.deepEqual(result.agy['git-workflow'], { link: 'linked', hook: 'configured' });
+    assert.deepEqual(result.agy['project-memory'], { link: 'linked', hook: 'configured' });
+    assert.deepEqual(result.agy['dev-writing'], { link: 'linked', hook: 'unsupported' });
+    assert.deepEqual(result.agy['coding-standards'], { link: 'linked', hook: 'unsupported' });
   });
 });
 
 test('uninstall 只删本仓库的链接和 Hook', () => {
   withHome((home) => {
     const claudeDir = path.join(home, '.claude');
-    fs.mkdirSync(claudeDir);
-    fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [FOREIGN_HOOK] } }));
-    install({ home, platforms: ['claude'], log: quiet });
+    writeForeignHooks(home);
+    install({ home, platforms: ALL_PLATFORMS, log: quiet });
     fs.mkdirSync(path.join(claudeDir, 'skills', 'other'));
-    uninstall({ home, platforms: ['claude'], log: quiet });
+    uninstall({ home, platforms: ALL_PLATFORMS, log: quiet });
     assert.deepEqual(fs.readdirSync(path.join(claudeDir, 'skills')), ['other']);
-    assert.deepEqual(readJson(path.join(claudeDir, 'settings.json')), { hooks: { PreToolUse: [FOREIGN_HOOK] } });
+    assert.deepEqual(fs.readdirSync(path.join(home, '.codex', 'skills')), []);
+    assert.deepEqual(fs.readdirSync(path.join(agyDir(home), 'skills')), []);
+    assert.deepEqual(readJson(path.join(claudeDir, 'settings.json')), { model: 'x', hooks: { PreToolUse: [FOREIGN_HOOK] } });
+    assert.deepEqual(readJson(path.join(home, '.codex', 'hooks.json')), {});
+    assert.deepEqual(readJson(path.join(agyDir(home), 'hooks.json')), { 'custom-guard': FOREIGN_AGY_GROUP });
     for (const name of SKILLS) assert.ok(fs.existsSync(path.join(REPO_ROOT, 'skills', name, 'SKILL.md')));
-  });
-});
-
-test('antigravity 链接技能、合并命名 hooks.json 并在卸载时保留其他 Hook', () => {
-  withHome((home) => {
-    const agyDir = path.join(home, '.gemini', 'config');
-    fs.mkdirSync(agyDir, { recursive: true });
-    const otherHook = { PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'echo hi' }] }] };
-    fs.writeFileSync(path.join(agyDir, 'hooks.json'), JSON.stringify({ 'custom-guard': otherHook }));
-
-    const result = install({ home, platforms: ['antigravity'], log: quiet });
-    assert.deepEqual(result, { conflicts: [], hooksChanged: { antigravity: true } });
-    for (const name of SKILLS) {
-      assert.equal(fs.realpathSync(path.join(agyDir, 'skills', name)), fs.realpathSync(path.join(REPO_ROOT, 'skills', name)));
-    }
-
-    const hooks = readJson(path.join(agyDir, 'hooks.json'));
-    assert.deepEqual(hooks['custom-guard'], otherHook);
-    assert.equal(hooks[ANTIGRAVITY_HOOK_KEY].PreToolUse[0].matcher, 'run_command');
-    assert.equal(hooks[ANTIGRAVITY_HOOK_KEY].PostToolUse, undefined);
-    assert.equal(hooks[ANTIGRAVITY_HOOK_KEY].SessionStart.length, 1);
-    assert.equal(hooks[ANTIGRAVITY_HOOK_KEY].PreInvocation.length, 1);
-    assert.equal(hooks[ANTIGRAVITY_HOOK_KEY].SessionStart[0].hooks, undefined);
-
-    const st = status({ home, platforms: ['antigravity'], log: quiet }).antigravity;
-    assert.deepEqual(st['git-workflow'], { link: 'linked', hook: 'configured' });
-    assert.deepEqual(st['project-memory'], { link: 'linked', hook: 'configured' });
-    assert.deepEqual(st['dev-writing'], { link: 'linked', hook: 'unsupported' });
-    assert.deepEqual(st['coding-standards'], { link: 'linked', hook: 'unsupported' });
-
-    assert.equal(install({ home, platforms: ['antigravity'], log: quiet }).hooksChanged.antigravity, false);
-
-    uninstall({ home, platforms: ['antigravity'], log: quiet });
-    assert.deepEqual(fs.readdirSync(path.join(agyDir, 'skills')), []);
-    assert.deepEqual(readJson(path.join(agyDir, 'hooks.json')), { 'custom-guard': otherHook });
   });
 });

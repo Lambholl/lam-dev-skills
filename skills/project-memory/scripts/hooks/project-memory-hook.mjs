@@ -48,21 +48,19 @@ async function readStdin() {
 
 async function main() {
   const input = JSON.parse(await readStdin());
-  const isAntigravity = input.hook_event_name === undefined && (input.hookEventName !== undefined || input.conversationId !== undefined || input.workspacePaths !== undefined);
-  const startDir = input.cwd ?? input.workspacePaths?.[0] ?? process.cwd();
-  const memoryRoot = findMemoryRoot(startDir);
-  if (!memoryRoot) {
-    if (isAntigravity) process.stdout.write('{}');
-    return;
-  }
+  // Antigravity 的输入没有事件名和 cwd，用 conversationId 认出它，用 workspacePaths 找项目，靠有没有 invocationNum 区分 PreInvocation 和 SessionStart。
+  const isAntigravity = input.conversationId !== undefined;
+  const memoryRoot = findMemoryRoot(input.cwd ?? input.workspacePaths?.[0] ?? process.cwd());
   if (isAntigravity) {
-    const eventName = input.hookEventName ?? (input.invocationNum !== undefined ? 'PreInvocation' : 'SessionStart');
-    const context = eventName === 'SessionStart' ? sessionProtocol(memoryRoot)
-      : eventName === 'PreInvocation' && (input.invocationNum == null || input.invocationNum <= 1) ? promptReminder(memoryRoot)
+    // invocationNum 从 0 数，只在一轮的第一次模型调用前提醒，对应 UserPromptSubmit。
+    const context = !memoryRoot ? null
+      : input.invocationNum === undefined ? sessionProtocol(memoryRoot)
+      : input.invocationNum === 0 ? promptReminder(memoryRoot)
       : null;
     process.stdout.write(JSON.stringify(context ? { injectSteps: [{ systemMessage: { systemMessage: context } }] } : {}));
     return;
   }
+  if (!memoryRoot) return;
   const eventName = input.hook_event_name;
   const context = eventName === 'SessionStart' ? sessionProtocol(memoryRoot)
     : eventName === 'UserPromptSubmit' ? promptReminder(memoryRoot)
