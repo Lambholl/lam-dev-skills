@@ -27,6 +27,8 @@
 | --- | --- | --- |
 | TypeScript | `tsc --noEmit`、ESLint + typescript-eslint、Prettier 或项目 formatter | 依赖安全扫描 |
 | JavaScript | ESLint、Prettier 或项目 formatter、目标运行时的语法检查 | 依赖安全扫描 |
+| React | 同 TypeScript 或 JavaScript，另加 eslint-plugin-react、eslint-plugin-react-hooks | |
+| Vue | `vue-tsc --noEmit`（代替 `tsc`）、ESLint + eslint-plugin-vue + typescript-eslint、Prettier 或项目 formatter | |
 | Python | Ruff（lint 和格式）、mypy 或 pyright | Bandit 或同类安全规则 |
 | Java | Gradle 或 Maven 编译、Checkstyle（Google 规则）、google-java-format 或项目 formatter | `-Xlint:all`、Error Prone；Android 项目加 Android lint |
 | C# | `dotnet build`、.NET analyzers、nullable 检查、`dotnet format` | 在 `.editorconfig` 里提升关键 CA/IDE 规则的级别 |
@@ -36,7 +38,7 @@
 | Shell | ShellCheck、`shfmt -d`、`bash -n` | |
 | PowerShell | PSScriptAnalyzer、`Invoke-Formatter`、语法解析 | |
 
-formatter 和 lint 规则冲突时，用 formatter 管排版，关掉 lint 里冲突的规则（如 `eslint-config-prettier`）。
+formatter 和 lint 规则冲突时，用 formatter 管排版，关掉 lint 里冲突的规则（如 `eslint-config-prettier`）。`eslint-config-prettier` 也会关掉 `vue/html-self-closing`，Vue 项目要重新打开，见 `frameworks/vue.md`。
 
 ## C 和 C++ 补充
 

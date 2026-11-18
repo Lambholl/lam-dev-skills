@@ -26,10 +26,11 @@ description: 编写、修改或评审代码和测试，或者配置 lint、forma
 | 任务 | 读取 |
 | --- | --- |
 | 写、改或评审代码 | 本文件，以及 `references/languages/` 下目标文件语言的规则 |
+| 写、改或评审 React（`.jsx`、`.tsx`）或 Vue（`.vue`）组件 | 另读 `references/frameworks/react.md` 或 `vue.md` |
 | 写、改或删测试，或者决定要不要加测试 | 另读 `references/testing.md` |
 | 配置 CI、lint、formatter、类型检查或分析器 | 另读 `references/static-checks.md` |
 
-语言规则已有：TypeScript、JavaScript、Python、Java、C#、C、C++、Rust、Shell、PowerShell。没有专属文件的语言只用本文件。
+语言规则已有：TypeScript、JavaScript、Python、Java、C#、C、C++、Rust、Shell、PowerShell。没有专属文件的语言只用本文件。框架规则已有：React、Vue。
 
 ## 文件编码和换行
 
@@ -48,7 +49,7 @@ description: 编写、修改或评审代码和测试，或者配置 lint、forma
 ## 命名
 
 - 名字说清是什么、做什么，用代码和项目术语表里查得到的词。
-- 布尔变量、参数和字段用 `is`、`has`、`can`、`should`、`was`、`did`、`will`、`must`、`need`、`allow`、`support`、`contain`、`include`、`exist`、`match` 等前缀，大小写跟随语言，如 `isConnected`、`has_permission`。语言规则另有约定的按语言规则。
+- 布尔变量、参数和字段用 `is`、`has`、`can`、`should`、`was`、`did`、`will`、`must`、`need`、`allow`、`support`、`contain`、`include`、`exist`、`match` 等前缀，大小写跟随语言，如 `isConnected`、`has_permission`。语言规则或框架规则另有约定的按它们的规则。
 
 ## 错误处理
 
