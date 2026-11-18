@@ -7,7 +7,7 @@
 | 技能 | 什么时候用 | 做什么 | Hook |
 | --- | --- | --- | --- |
 | `dev-writing` | 写或改项目文档、发布说明、界面文案 | 按读者组织内容，写清状态，去掉套话和多余免责 | 写入 Markdown 后提醒自查 |
-| `git-workflow` | 写提交信息/PR，或执行 commit、push、merge、rebase | Conventional Commits 格式，写清正文，确认身份和授权 | 首次 commit/PR 时拦下给自查清单 |
+| `git-workflow` | 写提交信息/PR，或执行 commit、push、merge、rebase | Conventional Commits 格式，正文按需写，确认身份和授权 | 首次 commit/PR 时拦下给自查清单 |
 | `coding-standards` | 写、改、评审代码和测试，配置 lint/CI | 命名、错误处理、注释等规则，以及测试取舍 | 新增注释时提醒自查 |
 | `project-memory` | 项目有 `.project-memory/`，或要建立项目记忆 | 保存项目的事实、需求、决定和当前工作 | 会话开始注入记忆入口 |
 

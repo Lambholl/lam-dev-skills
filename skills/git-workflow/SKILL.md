@@ -5,7 +5,7 @@ description: 写提交信息或 PR 描述，以及执行 git add、commit、push
 
 # Git 提交
 
-提交信息写给以后对照 diff 查历史的人。他们看得到改了哪些行，看不到为什么改、行为变成什么样、哪些情况还没测。
+提交信息写给以后对照 diff 查历史的人。他们看得到改了哪些行，看不到为什么改、行为变成什么样。标题够用就只写标题。
 
 ## 项目差异
 
@@ -17,19 +17,40 @@ description: 写提交信息或 PR 描述，以及执行 git add、commit、push
 
 - 用 `git status` 和 `git diff --stat` 确认暂存的只有本次工作的文件。
 - 一个提交对应一个完整的阶段成果：一项功能、一次修复、一次重构、一次文档更新。
-- 跑和本次改动相关的最小验证，结果写进正文。
+- 跑和本次改动相关的最小验证。
 
 ## 语言
 
 提交信息用项目约定的语言。项目没有约定时跟随最近的提交；仓库还没有提交时，用请求者在对话里用的语言。
 
-## 标题
+## 格式
 
 ```text
 <type>(<scope>): <描述>
+
+[正文，可选]
+
+[页脚，可选]
 ```
 
-- `type` 固定用英文：`feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore`、`revert`。
+## 标题
+
+- `type` 固定用英文：
+
+| Type | Description |
+| --- | --- |
+| feat | A new feature for the user |
+| fix | A bug fix for the user |
+| docs | Documentation only changes |
+| style | Code style (formatting, semicolons) |
+| refactor | Code change (no bug fix, no feature) |
+| perf | Performance improvement |
+| test | Adding or correcting tests |
+| build | Build system or dependencies |
+| ci | CI configuration and scripts |
+| chore | Routine tasks (no src/test change) |
+| revert | Reverts a previous commit |
+
 - `scope` 写受影响的模块，用提交信息的语言，可以省略。
 - 描述写这次改了什么，具体到不看正文也知道改动对象。中文用动宾短语；英文用祈使句、首字母小写。两种都不加句号。
 - 不兼容的变更在 `type` 或 `scope` 后加 `!`，并在页脚写 `BREAKING CHANGE:`，说明怎么迁移。
@@ -48,30 +69,37 @@ description: 写提交信息或 PR 描述，以及执行 git add、commit、push
 
 ## 正文
 
-错别字、格式调整、单行配置这类改动可以只写标题，其余都写正文。
+正文可选。标题加上 diff 已经能让人看懂这次改动时，不写正文，如改错别字、调格式、升级依赖、改单行配置，以及原因一看就懂的小修复。
 
-正文写 diff 里看不出的内容：
+标题和 diff 说明不了的内容才写进正文：
 
-- 改之前有什么问题，为什么改；
-- 行为变化和关键取舍；
-- 风险；
-- 验证结论和没测的场景。
+- 改之前有什么问题，为什么要改；
+- 行为变成什么样，做了什么取舍；
+- 会影响使用者或后续开发的风险，如兼容性变化、已知没处理的情况。
 
-默认格式：标题下第一段用一两句写背景和原因，不加段落名；后面接三个带段落名的段落。没有内容的段落直接省略，不写“无”。
+写法：
 
-| 中文段落名 | 英文段落名 | 内容 |
-| --- | --- | --- |
-| 技术方案： | Changes: | 每条一个要点，写行为和取舍 |
-| 影响范围： | Scope: | 一行列出受影响的模块或接口 |
-| 测试确认： | Testing: | 跑过的检查、手动验证的条件、没测的场景 |
+- 一个提交里有几项各自独立的变化、一段话写不清时分点，每点一两行。
+- 不加“技术方案”“影响范围”“测试确认”这类段落名。
+- 不写测试结果和验证过程，如“测试通过”“手动验证过”。验证情况写在 PR 描述里。
+- 正文超过 10 行时，先看能不能拆成几个提交，或者把细节移到 PR 描述和项目文档。
+- 如果是中文提交，一段话写在一行中，不因一行过长而拆行。
 
-正文一般不超过 10 行。这些内容 diff 或项目文档里已经有，不写进正文：
+这些内容 diff 或项目文档里已经有，不写进正文：
 
 - 实现步骤；
 - 函数、常量、字段的逐项说明；
 - 逐个文件的清单；
 - 文档或项目记忆的同步清单，以及记忆维护命令；
 - 项目记忆里的编号，如工作包、变更请求的 ID。条目闭环后会从记忆里删除，留在提交历史里的编号就查不到了。
+
+## 页脚
+
+页脚可选，只放固定格式的条目：
+
+- `BREAKING CHANGE: <变化和迁移方法>`；
+- 关联的 issue，如 `Closes #123`，格式跟随托管平台和项目习惯；
+- 工具或平台生成的 `Co-authored-by:` 等行，原样保留。
 
 ## 身份和隐私
 
@@ -83,12 +111,12 @@ description: 写提交信息或 PR 描述，以及执行 git add、commit、push
 
 隐私：
 
-- 测试确认写复现需要的条件，如“同时有物理网卡和虚拟网卡的 Windows 电脑”。不写维护者的设备和环境标识：主机名、IP、MAC、序列号、带用户名的本机路径、所装软件和服务的产品名、测试数据来自哪台机器。结论确实依赖某个产品时才写产品名。
+- PR 描述里的验证情况写复现需要的条件，如“同时有物理网卡和虚拟网卡的 Windows 电脑”。不写维护者的设备和环境标识：主机名、IP、MAC、序列号、带用户名的本机路径、所装软件和服务的产品名、测试数据来自哪台机器。结论确实依赖某个产品时才写产品名。
 - 不写密钥、令牌、账号、客户隐私和未脱敏的日志。拿不准是否敏感就不写。
 
 ## PR 描述
 
-PR 描述用和提交信息相同的语言和取舍：概括变更，写验证结果、风险和没做完的事。PR 标题不要求符合提交标题格式，项目另有约定时按项目。
+PR 描述用和提交信息相同的语言，概括变更，写验证方式和结果、风险和没做完的事，不复述 diff。PR 标题不要求符合提交标题格式，项目另有约定时按项目。
 
 ## 授权
 
@@ -111,32 +139,49 @@ Git 操作要请求者在当前对话里明确同意。计划、项目文档和�
 
 ## 示例
 
+只写标题：
+
+```text
+docs(readme): 修正安装命令里的包名
+```
+
+```text
+fix(compiler-sfc): keep generic type arguments in scope
+```
+
+一段话正文：
+
 ```text
 fix(登录): 令牌过期后回到原页面
 
-令牌过期后接口返回 401，页面停在空白状态，只能手动刷新。
-
-技术方案：
-- 收到 401 时清除本地会话并跳转登录页
-- 跳转前记下当前路由，重新登录后返回
-
-影响范围：登录页、请求拦截
-
-测试确认：单元测试通过；手动让令牌过期后能回到原页面。多标签页同时过期的情况没测
+令牌过期后接口返回 401，页面停在空白状态，只能手动刷新。现在收到 401 时清除会话并跳到登录页，重新登录后回到原来的路由。
 ```
 
 ```text
 perf(search): cache tokenized queries per session
 
-Repeated searches re-tokenized the same query on every keystroke,
-which made typing lag on long documents.
+Repeated searches re-tokenized the same query on every keystroke, which
+made typing lag on long documents. Keep the last 50 tokenized queries in
+an LRU cache and clear it when the document language changes.
+```
 
-Changes:
-- Keep the last 50 tokenized queries in an LRU cache per session
-- Clear the cache when the document language changes
+几项独立的变化，分点写：
 
-Testing: benchmark on a 2 MB document drops from 120 ms to 15 ms per
-keystroke. Right-to-left languages not tested.
+```text
+feat(同步): 接收端登记后立即备份，与传输并行
+
+- 原来备份要等内容全部收齐后才开始。现在接收端登记任务后马上并开始备份，发送端同时打包上传；备份完成后等内容到齐再写入。
+- 等内容期间目标可能被改动，写入前按计划重新比对目标的目录列表，有变化时本次失败。
+- 内容传输失败时停下备份，任务按内容错误结束；写入失败时停下接收，上传方收到 task-conflict，再按接收端报告的错误结束。
+- 进度改为备份、传输、写入三段；接收端备份期间显示备份进度，完成后接着显示传输进度。
+```
+
+不兼容的变更：
+
+```text
+feat(config)!: 配置文件从 JSON 改为 TOML
+
+BREAKING CHANGE: 不再读取 config.json。运行 `app migrate-config` 把旧配置转成 config.toml。
 ```
 
 ## Hook

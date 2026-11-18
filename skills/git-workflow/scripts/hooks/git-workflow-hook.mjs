@@ -9,7 +9,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const REMINDER =
-  '提交信息自查（git-workflow 技能，本会话没读过就先读）：标题用 type(scope): 描述，语言跟随项目；正文只写 diff 看不出的原因、行为变化、风险、验证结论和没测的场景，每条一个要点；不复述实现步骤、逐个文件的清单和记忆编号；不写对话过程、维护者设备和环境标识。查过没问题就原样重新执行，提交信息不变就会放行；改过信息会再提醒一次。';
+  '提交信息自查（git-workflow 技能，本会话没读过就先读）：标题用 type(scope): 描述，语言跟随项目；正文可选，标题说得清就不写；要写就只写 diff 看不出的原因、行为变化和风险，几项独立的变化分点写；不写测试结果、实现步骤、逐文件清单、记忆编号、对话过程、维护者设备和环境标识。查过没问题就原样重新执行，提交信息不变就会放行；改过信息会再提醒一次。';
 
 const STATE_DIR = path.join(os.tmpdir(), 'lam-git-workflow-hook');
 const STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
