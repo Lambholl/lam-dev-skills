@@ -19,9 +19,9 @@
 需要 Node.js 22 或更高版本。
 
 ```bash
-git clone https://github.com/Lambholl/lam-dev-skills.git lam-dev-skills
+git clone https://github.com/Lambholl/lam-dev-skills.git
 cd lam-dev-skills
-node scripts/install.mjs install
+npm run install-skills
 ```
 
 `install` 把每个技能链接到对应平台的用户级技能目录，再把 Hook 合并进用户级配置。配置里已有的其他 Hook 和设置不动，改之前先备份成 `<文件>.bak-<时间>`。
@@ -40,18 +40,18 @@ Codex 对新加或改过的 Hook 要先信任才执行。安装后在 Codex 里�
 
 ```bash
 # 先看会改什么，不写文件
-node scripts/install.mjs install --dry-run
+npm run install-skills --dry-run
 
 # 只装到某个平台；默认 all，即 home 目录下已有对应配置目录的平台
-node scripts/install.mjs install --platform claude
-node scripts/install.mjs install --platform codex
-node scripts/install.mjs install --platform agy
+npm run install-skills --platform claude
+npm run install-skills --platform codex
+npm run install-skills --platform agy
 
 # 查看每个技能的链接和 Hook 状态
-node scripts/install.mjs status
+npm run status
 
 # 删除本仓库的链接和 Hook，其他内容不动
-node scripts/install.mjs uninstall
+npm run uninstall
 ```
 
 技能目录里已有同名目录、又不是本仓库的链接时，`install` 报冲突，不动它，以退出码 1 结束。确认不再需要那个目录后删掉它，再运行一次 `install`。
