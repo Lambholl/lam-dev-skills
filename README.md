@@ -38,14 +38,16 @@ Codex 对新加或改过的 Hook 要先信任才执行。安装后在 Codex 里�
 
 ### 安装命令
 
+通过 `npm run` 传选项时需要在选项前加 `--`。
+
 ```bash
 # 先看会改什么，不写文件
-npm run install-skills --dry-run
+npm run install-skills -- --dry-run
 
 # 只装到某个平台；默认 all，即 home 目录下已有对应配置目录的平台
-npm run install-skills --platform claude
-npm run install-skills --platform codex
-npm run install-skills --platform agy
+npm run install-skills -- --platform claude
+npm run install-skills -- --platform codex
+npm run install-skills -- --platform agy
 
 # 查看每个技能的链接和 Hook 状态
 npm run status

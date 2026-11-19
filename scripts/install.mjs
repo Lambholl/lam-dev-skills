@@ -335,26 +335,77 @@ export function status({ home = os.homedir(), platforms, repoRoot = REPO_ROOT, l
   return result;
 }
 
-function main(argv) {
+/**
+ * 解析命令行参数，返回动作、`platform` 和 `isDryRun`；识别不到动作名时 `action` 为 `undefined`。
+ *
+ * @param {string[]} argv
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {{ isHelp: boolean, action?: string, platform?: string, isDryRun?: boolean }}
+ * @throws {Error} 选项不合法、被 npm 拦截，或包含动作名之外的位置参数时。
+ */
+export function parseCliArgs(argv, env = process.env) {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: { platform: { type: 'string', default: 'all' }, 'dry-run': { type: 'boolean' }, help: { type: 'boolean', short: 'h' } }
+    options: {
+      platform: { type: 'string' },
+      'dry-run': { type: 'boolean', default: false },
+      help: { type: 'boolean', short: 'h', default: false }
+    }
   });
-  const action = positionals[0];
-  if (values.help || !['install', 'status', 'uninstall'].includes(action)) {
+  if (values.help) return { isHelp: true };
+  const [action, ...extraPositionals] = positionals;
+  if (!['install', 'status', 'uninstall'].includes(action)) return { isHelp: false, action: undefined };
+
+  const npmScript = env.npm_lifecycle_event && (!env.npm_lifecycle_script || env.npm_lifecycle_script.includes('install.mjs'))
+    ? env.npm_lifecycle_event
+    : null;
+  if (npmScript) {
+    // npm run 会吞掉 `--` 之前的选项并写入 npm_config_platform 和 npm_config_dry_run，不能静默回退成全量安装或真实写入。
+    const swallowed = [];
+    if (env.npm_config_platform !== undefined && env.npm_config_platform !== 'false' && values.platform === undefined) {
+      swallowed.push('--platform');
+    }
+    if (env.npm_config_dry_run === 'true' && !values['dry-run']) {
+      swallowed.push('--dry-run');
+    }
+    if (swallowed.length) {
+      const exampleArgs = [];
+      if (swallowed.includes('--platform')) {
+        const platformHint = extraPositionals[0] || (env.npm_config_platform && env.npm_config_platform !== 'true' ? env.npm_config_platform : '<平台>');
+        exampleArgs.push('--platform', platformHint);
+      }
+      if (swallowed.includes('--dry-run')) exampleArgs.push('--dry-run');
+      throw new Error(`选项 ${swallowed.join('、')} 被 npm 拦截，未传给脚本。通过 npm run 传参时请加 --，例如：npm run ${npmScript} -- ${exampleArgs.join(' ')}`);
+    }
+  }
+  if (extraPositionals.length) {
+    const hint = npmScript ? `。通过 npm run 传参时请在选项前加 --，例如：npm run ${npmScript} -- --platform ${extraPositionals[0]}` : '';
+    throw new Error(`无法识别的位置参数：${extraPositionals.join(' ')}${hint}`);
+  }
+  return {
+    isHelp: false,
+    action,
+    platform: values.platform ?? 'all',
+    isDryRun: values['dry-run']
+  };
+}
+
+function main(argv, env = process.env) {
+  const parsed = parseCliArgs(argv, env);
+  if (parsed.isHelp || !parsed.action) {
     console.log(`用法：node scripts/install.mjs install|status|uninstall [--platform all|${Object.keys(PLATFORMS).join('|')}] [--dry-run]`);
-    return values.help ? 0 : 1;
+    return parsed.isHelp ? 0 : 1;
   }
   const home = os.homedir();
-  const platforms = selectPlatforms(values.platform, home);
+  const platforms = selectPlatforms(parsed.platform, home);
   if (!platforms.length) {
     console.log('home 目录下没有 .claude、.codex 或 .gemini/config，没有可处理的平台，可用 --platform <名称> 指定。');
     return 1;
   }
-  const options = { home, platforms, dryRun: values['dry-run'] };
-  if (action === 'install') return install(options).conflicts.length ? 1 : 0;
-  if (action === 'uninstall') uninstall(options);
+  const options = { home, platforms, dryRun: parsed.isDryRun };
+  if (parsed.action === 'install') return install(options).conflicts.length ? 1 : 0;
+  if (parsed.action === 'uninstall') uninstall(options);
   else status(options);
   return 0;
 }

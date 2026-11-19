@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { ANTIGRAVITY_HOOK_KEY, REPO_ROOT, install, listSkills, selectPlatforms, status, uninstall } from './install.mjs';
+import { ANTIGRAVITY_HOOK_KEY, REPO_ROOT, install, listSkills, parseCliArgs, selectPlatforms, status, uninstall } from './install.mjs';
 
 const SKILLS = ['coding-standards', 'dev-writing', 'git-workflow', 'project-memory'];
 const FOREIGN_HOOK = { matcher: 'Bash', hooks: [{ type: 'command', command: 'node other-hook.mjs' }] };
@@ -160,4 +160,38 @@ test('uninstall 只删本仓库的链接和 Hook', () => {
     assert.deepEqual(readJson(path.join(agyDir(home), 'hooks.json')), { 'custom-guard': FOREIGN_AGY_GROUP });
     for (const name of SKILLS) assert.ok(fs.existsSync(path.join(REPO_ROOT, 'skills', name, 'SKILL.md')));
   });
+});
+
+test('parseCliArgs 解析正常参数，拒绝多余位置参数和被 npm 拦截的选项', () => {
+  assert.deepEqual(parseCliArgs(['install'], {}), { isHelp: false, action: 'install', platform: 'all', isDryRun: false });
+  assert.deepEqual(parseCliArgs(['install', '--platform', 'agy', '--dry-run'], {}), {
+    isHelp: false,
+    action: 'install',
+    platform: 'agy',
+    isDryRun: true
+  });
+  assert.deepEqual(parseCliArgs(['--help'], {}), { isHelp: true });
+
+  // npm run 漏写 -- 时会把选项写入 npm_config_platform 或 npm_config_dry_run，并把空格后的值当成位置参数传给脚本。
+  assert.throws(
+    () => parseCliArgs(['install', 'agy'], { npm_lifecycle_event: 'install-skills', npm_config_platform: 'true' }),
+    /npm run install-skills -- --platform agy/
+  );
+  assert.throws(
+    () => parseCliArgs(['install'], { npm_lifecycle_event: 'install-skills', npm_config_platform: 'agy' }),
+    /npm run install-skills -- --platform agy/
+  );
+  assert.throws(
+    () => parseCliArgs(['install'], { npm_lifecycle_event: 'install-skills', npm_config_dry_run: 'true' }),
+    /npm run install-skills -- --dry-run/
+  );
+  assert.throws(
+    () => parseCliArgs(['install', 'agy'], {
+      npm_lifecycle_event: 'install-skills',
+      npm_config_platform: 'true',
+      npm_config_dry_run: 'true'
+    }),
+    /npm run install-skills -- --platform agy --dry-run/
+  );
+  assert.throws(() => parseCliArgs(['install', 'agy'], {}), /无法识别的位置参数：agy/);
 });
