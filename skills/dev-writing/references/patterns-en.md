@@ -29,10 +29,10 @@ When one of these appears, look for a plainer word. Terms defined in the project
 
 ## Register and tone
 
-Dropping corporate fluff does not mean writing chatty slang or telegraphic fragments:
+After removing corporate fluff, aim for concise, accurate technical prose:
 
-- **Developer docs**: Use concise, standard technical prose. Keep standard technical terms and API names (e.g., `desktop`, `frontend`, `DocumentProvider`, `mtime`), and use standard table headers and values (`Scenario`, `Required`, `Yes` / `No`, `Description` rather than casual questions).
-- **User docs**: Use plain everyday prose. Replace internal developer jargon with user-facing outcomes (e.g., `restore on failure` instead of `rollback on failure`), while avoiding overly casual shorthand.
+- **Developer docs**: Use concise, standard technical prose. Keep standard technical terms and API names (e.g., `desktop`, `frontend`, `DocumentProvider`, `mtime`), and use standard table headers and values (e.g., `Scenario`, `Required`, `Yes` / `No`, `Description`).
+- **User docs**: Use plain everyday prose. Replace internal developer jargon with user-facing outcomes (e.g., `restore on failure` instead of `rollback on failure`).
 
 ## Examples
 
@@ -69,7 +69,7 @@ Dropping corporate fluff does not mean writing chatty slang or telegraphic fragm
 
 **After:**
 
-> This guide is for developers editing, building, and releasing this repository. Run all commands from the repository root.
+> This guide is for developers of this repository. Run all commands from the repository root.
 >
 > | Scenario | Signing key required | Description |
 > | --- | --- | --- |
