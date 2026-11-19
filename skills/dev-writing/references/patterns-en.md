@@ -27,6 +27,13 @@ leverage, seamless, robust, holistic, synergy, empower, streamline, cutting-edge
 
 When one of these appears, look for a plainer word. Terms defined in the project glossary and standard technical terms are fine.
 
+## Register and tone
+
+Dropping corporate fluff does not mean writing chatty slang or telegraphic fragments:
+
+- **Developer docs**: Use concise, standard technical prose. Keep standard technical terms and API names (e.g., `desktop`, `frontend`, `DocumentProvider`, `mtime`), and use standard table headers and values (`Scenario`, `Required`, `Yes` / `No`, `Description` rather than casual questions).
+- **User docs**: Use plain everyday prose. Replace internal developer jargon with user-facing outcomes (e.g., `restore on failure` instead of `rollback on failure`), while avoiding overly casual shorthand.
+
 ## Examples
 
 **Developer doc, before (corporate fluff and hedged negation):**
@@ -46,6 +53,31 @@ When one of these appears, look for a plainer word. Terms defined in the project
 **After:**
 
 > `pnpm doctor` checks for Node, pnpm, JDK, and the Android SDK; pass `--desktop` to check only the desktop toolchain. `pnpm dev:mobile` opens the mobile web UI in a browser for layout work; features backed by Android native plugins, such as file-access grants and LAN transfers, must be tested on a device or emulator.
+
+---
+
+**Developer doc, before:**
+
+> For devs editing, building, or releasing here. Run everything from repo root.
+>
+> | Case | Need a key? | What to put |
+> | --- | --- | --- |
+> | Local dev | No need | Leave blank |
+> | Release build | Yep | Key path and password |
+>
+> **Read-only check changed file ctime.** Some doc providers change ctime after the first read grant. Look at raw content, size, and mtime instead.
+
+**After:**
+
+> This guide is for developers editing, building, and releasing this repository. Run all commands from the repository root.
+>
+> | Scenario | Signing key required | Description |
+> | --- | --- | --- |
+> | Local development | No | Uses the local debug keystore by default |
+> | Release build | Yes | Provide the keystore path and password |
+>
+> **File `ctime` changes after Android SAF reads**
+> Some DocumentProvider implementations update `ctime` on the first granted read. Compare file contents, size, and `mtime` instead.
 
 ---
 
