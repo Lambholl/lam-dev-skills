@@ -343,7 +343,7 @@ export function status({ home = os.homedir(), platforms, repoRoot = REPO_ROOT, l
  * @returns {{ isHelp: boolean, action?: string, platform?: string, isDryRun?: boolean }}
  * @throws {Error} 选项不合法、被 npm 拦截，或包含动作名之外的位置参数时。
  */
-export function parseCliArgs(argv, env = process.env) {
+function parseCliArgs(argv, env = process.env) {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
