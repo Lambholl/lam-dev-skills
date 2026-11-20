@@ -7,7 +7,7 @@ description: 项目里有 .project-memory/，或要为项目建立记忆时使�
 
 `.project-memory/` 保存项目现在的样子：当前事实、仍然有效的决定、还没做完的事。改动历史记在 Git 里。
 
-用了项目记忆的项目同时使用 `dev-writing`、`git-workflow`、`coding-standards` 三个技能。项目对它们的差异写在 `.project-memory/standards/`，见“项目规范”。
+用了项目记忆的项目同时使用 `dev-writing`、`git-workflow`、`coding-standards` 三个技能，项目对它们的差异写在 `.project-memory/standards/`（见“项目规范”）。开始编写或修改代码前，必须先读 `coding-standards` 技能、对应语言/框架规则和 `standards/coding.md`；上下文压缩后继续改代码时重读。
 
 本技能里，“请求者”指在当前对话里给 Agent 下达任务的人，“维护者”指项目里负责放行的人，“用户”指应用的使用者。
 
@@ -94,7 +94,7 @@ node <skill-path>/scripts/project-memory.mjs validate --project <path> [--format
 
 | 命令 | 作用 |
 | --- | --- |
-| `init` | 从模板创建 `.project-memory/`；已经存在时不覆盖 |
+| `init` | 从模板创建 `.project-memory/`（已经存在时不覆盖）；项目根目录没有 `AGENTS.md` 时一并创建，已有时不改动 |
 | `read` | 按标题读一个章节，范围到下一个同级或更高级标题为止；`--toc` 列目录，`--full` 读全文。普通的 `rg`、`cat` 也可以读 |
 | `index` | 列出目录过期的文件；加 `--write` 重建各文档的 `## 目录`，并按 front matter 重建 `INDEX.md` 的文档目录 |
 | `validate` | 链接目标不存在、同一张表里编号重复、`id_high_water` 小于已用的最大编号、ADR 编号被多个文件占用时报失败；目录过期、锚点失效只给建议 |

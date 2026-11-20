@@ -1,6 +1,6 @@
 # Lambholl's Development Skills
 
-给 Claude Code、Codex 和 Antigravity 用的四个开发技能：写文档、写提交信息、写代码和维护项目记忆。每个技能带一个 Hook，在 Agent 写文档、写注释、提交和开新会话时提醒它按技能自查。
+给 Claude Code、Codex 和 Antigravity 用的四个开发技能：写文档、写提交信息、写代码和维护项目记忆。每个技能带一个 Hook，在 Agent 写文档、首次写源码、提交和开新会话时提醒它按技能自查。
 
 ## 技能
 
@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | `dev-writing` | 写或改项目文档、发布说明、界面文案 | 按读者组织内容，写清状态，去掉套话和多余免责 | 写入 Markdown 后提醒自查 |
 | `git-workflow` | 写提交信息/PR，或执行 commit、push、merge、rebase | Conventional Commits 格式，正文按需写，确认身份和授权 | 首次 commit/PR 时拦下给自查清单 |
-| `coding-standards` | 写、改、评审代码和测试，配置 lint/CI | 命名、错误处理、注释等规则，以及测试取舍 | 新增注释时提醒自查 |
+| `coding-standards` | 写、改、评审代码和测试，配置 lint/CI | 命名、错误处理、注释等规则，以及测试取舍 | 首次修改源码（含上下文压缩后）前拦下提醒先读规范 |
 | `project-memory` | 项目有 `.project-memory/`，或要建立项目记忆 | 保存项目的事实、需求、决定和当前工作 | 会话开始注入记忆入口 |
 
 
@@ -30,7 +30,7 @@ npm run install-skills
 | --- | --- | --- | --- |
 | `claude` | Claude Code | `~/.claude/skills/` | `~/.claude/settings.json`（全部 4 个技能） |
 | `codex` | Codex | `~/.codex/skills/` | `~/.codex/hooks.json`（全部 4 个技能） |
-| `agy` | Antigravity | `~/.gemini/config/skills/` | `~/.gemini/config/hooks.json`（`git-workflow`、`project-memory`；Antigravity 不支持 `PostToolUse` 注入上下文） |
+| `agy` | Antigravity | `~/.gemini/config/skills/` | `~/.gemini/config/hooks.json`（`coding-standards`、`git-workflow`、`project-memory`；Antigravity 不支持 `PostToolUse` 注入上下文） |
 
 技能是链接，`git pull` 后直接生效。Hook 命令写的是仓库的绝对路径，要移动仓库时先 `uninstall`，移好后再 `install`。
 
@@ -63,7 +63,7 @@ npm run uninstall
 `project-memory` 自带一个命令行工具。`--project` 可以给项目根目录或 `.project-memory` 目录，默认当前目录。
 
 ```bash
-# 从模板创建 .project-memory/，已存在时不覆盖
+# 从模板创建 .project-memory/（已存在时不覆盖），根目录无 AGENTS.md 时一并创建
 node skills/project-memory/scripts/project-memory.mjs init --project .
 
 # 读全文、只读目录、只读一个章节

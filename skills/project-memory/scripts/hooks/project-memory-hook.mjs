@@ -25,7 +25,7 @@ export function sessionProtocol(memoryRoot) {
     `- 入口：${path.join(memoryRoot, 'INDEX.md')}。先读 INDEX，再按任务和文档的 \`## 目录\` 选读正文；任务范围变了重新查看。`,
     '- 讨论、评审、诊断、解释只读，不登记当前工作，结束时在对话里报告。',
     '- 写任务开工前在 INDEX“当前工作”登记，检查点和阻塞时更新；做完并验证后同步记忆，标为 `in-review`；请求者明确满意、要求提交或开 PR、转去无关任务时才删行。登记新工作前先处理已有的 `in-review` 行。',
-    '- 写文档、提交、写代码时分别按 dev-writing、git-workflow、coding-standards 技能，项目差异在 `standards/`。',
+    '- 编写或修改代码前，必须先读 coding-standards 技能、对应语言/框架规则和 `standards/coding.md`（上下文压缩后继续改代码时重读）；写文档、提交前分别按 dev-writing、git-workflow 技能，项目差异在 `standards/`。',
     '- Git 操作，以及文档里流程上的确认、验收和待决定，都要请求者在当前对话明确同意；Agent 不自己确认。',
     '- 完整规则见 project-memory 技能。'
   ].join('\n');

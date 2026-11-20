@@ -33,6 +33,7 @@ test('会话开始注入协议，提问时注入短提醒', () => {
   assert.equal(start.hookSpecificOutput.hookEventName, 'SessionStart');
   assert.ok(start.hookSpecificOutput.additionalContext.includes(path.join(root, '.project-memory', 'INDEX.md')));
   assert.match(start.hookSpecificOutput.additionalContext, /只读/);
+  assert.match(start.hookSpecificOutput.additionalContext, /必须先读 coding-standards/);
   const prompt = JSON.parse(runHook({ hook_event_name: 'UserPromptSubmit', cwd: root }).stdout);
   assert.equal(prompt.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
   fs.rmSync(root, { recursive: true, force: true });

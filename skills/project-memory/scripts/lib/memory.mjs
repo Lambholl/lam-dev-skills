@@ -39,16 +39,23 @@ export function today(date = new Date()) {
 
 /**
  * 从模板创建记忆目录，把 `{{TODAY}}` 换成 date，再生成 INDEX 的文档目录。
+ * 传入 agentsTemplate 时，项目根目录尚无 AGENTS.md 则一并复制，已有时不改动。
  *
+ * @returns {{agentsStatus: 'created'|'exists'|'skipped', agentsTarget: string|null}} AGENTS.md 的处理结果。
  * @throws {Error} 记忆目录已经存在时，不改动任何文件。
  */
-export function initMemory(memoryRoot, templateRoot, date = today()) {
+export function initMemory(memoryRoot, templateRoot, date = today(), agentsTemplate = null) {
   if (fs.existsSync(memoryRoot)) throw new Error(`记忆目录已存在，没有改动：${memoryRoot}`);
   fs.cpSync(templateRoot, memoryRoot, { recursive: true });
   for (const file of listMarkdownFiles(memoryRoot)) {
     fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replaceAll('{{TODAY}}', date));
   }
   rebuildIndex(memoryRoot);
+  if (!agentsTemplate) return { agentsStatus: 'skipped', agentsTarget: null };
+  const agentsTarget = path.join(path.dirname(memoryRoot), 'AGENTS.md');
+  if (fs.existsSync(agentsTarget)) return { agentsStatus: 'exists', agentsTarget };
+  fs.copyFileSync(agentsTemplate, agentsTarget);
+  return { agentsStatus: 'created', agentsTarget };
 }
 
 /**

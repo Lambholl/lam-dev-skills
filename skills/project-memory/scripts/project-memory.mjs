@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 
 import { initMemory, readMemoryFile, rebuildIndex, resolveMemoryRoot, staleIndexFiles, validateMemory } from './lib/memory.mjs';
 
-const templateRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'templates', '.project-memory');
+const templatesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'templates');
+const templateRoot = path.join(templatesDir, '.project-memory');
+const agentsTemplate = path.join(templatesDir, 'AGENTS.md');
 
 const USAGE = `用法：
   project-memory.mjs init [--project <路径>]
@@ -47,8 +49,10 @@ function run(argv) {
 
   if (command === 'init') {
     const memoryRoot = resolveMemoryRoot(values.project);
-    initMemory(memoryRoot, templateRoot);
+    const result = initMemory(memoryRoot, templateRoot, undefined, agentsTemplate);
     console.log(`已创建：${memoryRoot}`);
+    if (result.agentsStatus === 'created') console.log(`已创建：${result.agentsTarget}`);
+    else if (result.agentsStatus === 'exists') console.log(`已存在，未改动：${result.agentsTarget}（请按需合并前置技能说明）`);
     return 0;
   }
 

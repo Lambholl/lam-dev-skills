@@ -1,81 +1,85 @@
 #!/usr/bin/env node
-// coding-standards 技能的 PostToolUse Hook：写入的源码新增了注释时提醒按技能自查，不限注释语言。
+// coding-standards 技能的 PreToolUse / SessionStart Hook：同一会话首次写入或修改源码前（以及上下文压缩后）拦下一次，提醒先读取规范。
+// 提醒必须在修改源码前送到 Agent，所以用退出码 2（Antigravity 用 deny JSON）拦下一次，重试即放行。
 
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const REMINDER =
-  '注释自查（coding-standards 技能“注释”一节，本会话没读过就先读）：注释用项目约定的语言；文档注释只写当前符号对外的契约，不写调用方、实现和架构；行内注释写原因和后果，不复述代码，不写代码没做的事；不写工单号和多余的免责解释。有问题就改，没有就继续。';
+  '编码与注释规范门禁（coding-standards 技能）：首次修改源码或上下文压缩后，必须先读取 coding-standards 技能、对应语言/框架规则以及项目 standards/coding.md（没有则看 AGENTS.md / CLAUDE.md）。读完后重试本次写入即可放行，同会话后续写入不再拦截；批量改完源码、报告完成或提交前，对照 diff 按技能“注释自检”核对全部新增和修改的注释。';
 
-// 文档和数据文件不按源码检查。
+const STATE_DIR = path.join(os.tmpdir(), 'lam-coding-standards-hook');
+const STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// 文档和数据文件不按源码拦截。
 const NON_CODE_FILE = /\.(md|mdx|markdown|txt|json|jsonc|lock|csv|tsv|log|svg)$/i;
 
-// 注释标记后面同一行出现字母才算注释，分隔线“// -----”这类不算。
-const LETTER_AFTER = String.raw`.*\p{L}`;
-const SLASH = String.raw`(?:^|[\s;{}(),])(?:\/\/|\/\*)|^[ \t]*\*(?!\/)`;
-// “#” 后面要有空白，排除 #include、颜色值和 shebang。
-const HASH = String.raw`(?:^|\s)#\s|^[ \t]*<#`;
-const DOCSTRING = String.raw`^[ \t]*[rRuU]?("""|''')`;
-const DASH = String.raw`(?:^|\s)--\s`;
-const HTML = String.raw`<!--`;
-const BATCH = String.raw`^[ \t]*(?:@?rem\s|::)`;
-
-const FAMILIES = [
-  { pattern: /\.(c|h|cc|cpp|cxx|hpp|hh|java|kt|kts|scala|cs|go|rs|swift|dart|js|mjs|cjs|jsx|ts|mts|cts|tsx|php|css|scss|less|groovy|gradle)$/i, markers: [SLASH] },
-  { pattern: /\.(py|pyi)$/i, markers: [HASH, DOCSTRING] },
-  { pattern: /\.(sh|bash|zsh|rb|pl|r|ps1|psm1|psd1|ya?ml|toml|cmake|tf|nix)$|(^|[\\/])(dockerfile|makefile|cmakelists\.txt)$/i, markers: [HASH] },
-  { pattern: /\.(sql|lua|hs)$/i, markers: [DASH] },
-  { pattern: /\.(html?|xml|vue|svelte)$/i, markers: [HTML, SLASH] },
-  { pattern: /\.(bat|cmd)$/i, markers: [BATCH] }
-];
-const DEFAULT_MARKERS = [SLASH, HASH];
-
-function commentPattern(filePath) {
-  const family = FAMILIES.find((item) => item.pattern.test(filePath));
-  const markers = family ? family.markers : DEFAULT_MARKERS;
-  return new RegExp(`(?:${markers.join('|')})${LETTER_AFTER}`, 'imu');
-}
-
-/** 一段源码文字里有注释时返回 true；按文件扩展名决定认哪些注释标记。 */
-export function hasComment(filePath, text) {
-  if (!filePath || NON_CODE_FILE.test(filePath)) return false;
-  return commentPattern(filePath).test(text);
+/** 路径指向源码文件时返回 true；文档、数据文件和空路径返回 false。 */
+export function isCodeFile(filePath) {
+  return Boolean(filePath) && !NON_CODE_FILE.test(filePath);
 }
 
 /**
- * 把 Codex apply_patch 的补丁文本按文件拆开，返回每个文件的路径和新增行（已去掉行首的 +）。
- * 补丁格式不在 Codex 的 Hook 文档里；格式变化后解析不到文件，这次写入就没有提醒。
+ * 从 Codex apply_patch 补丁文本中提取新增、修改或重命名后的目标文件路径。
+ * 补丁格式不在 Codex 的 Hook 文档里；格式变化后解析不到路径时返回空数组。
  */
-export function parsePatchAdditions(patch) {
-  const files = [];
-  let current = null;
+export function parsePatchPaths(patch) {
+  const paths = [];
+  let currentIndex = -1;
   for (const line of patch.split(/\r?\n/)) {
     const added = line.match(/^\*\*\* (?:Add|Update) File: (.+)$/);
     const moved = line.match(/^\*\*\* Move to: (.+)$/);
     if (added) {
-      current = { filePath: added[1].trim(), lines: [] };
-      files.push(current);
-    } else if (moved && current) {
-      current.filePath = moved[1].trim();
+      paths.push(added[1].trim());
+      currentIndex = paths.length - 1;
+    } else if (moved && currentIndex >= 0) {
+      paths[currentIndex] = moved[1].trim();
     } else if (/^\*\*\* (?:Delete File: |End Patch)/.test(line)) {
-      current = null;
-    } else if (current && line.startsWith('+')) {
-      current.lines.push(line.slice(1));
+      currentIndex = -1;
     }
   }
-  return files;
+  return paths;
 }
 
-/** 本次写入的源码新增了注释时返回提醒，否则返回 null。只看工具输入，不读文件。 */
-export function pickReminder(toolName, toolInput) {
+/** 本次工具调用会写入或修改至少一个源码文件时返回 true。 */
+export function hasCodeWrite(toolName, toolInput) {
   if (toolName === 'apply_patch') {
-    const files = parsePatchAdditions(String(toolInput.command ?? ''));
-    return files.some((file) => hasComment(file.filePath, file.lines.join('\n'))) ? REMINDER : null;
+    return parsePatchPaths(String(toolInput.command ?? '')).some(isCodeFile);
   }
-  const filePath = toolInput.file_path ?? toolInput.notebook_path ?? '';
-  const edits = Array.isArray(toolInput.edits) ? toolInput.edits.map((edit) => edit.new_string ?? '') : [];
-  const text = [toolInput.content, toolInput.new_string, toolInput.new_source, ...edits].filter(Boolean).join('\n');
-  return hasComment(filePath, text) ? REMINDER : null;
+  const filePath = toolInput.file_path ?? toolInput.notebook_path ?? toolInput.Path ?? toolInput.path ?? '';
+  return isCodeFile(String(filePath));
+}
+
+function sessionStateFile(sessionId, stateDir) {
+  const key = crypto.createHash('sha256').update(String(sessionId)).digest('hex').slice(0, 16);
+  return path.join(stateDir, `${key}.mark`);
+}
+
+/**
+ * 同一会话首次调用时返回 true 并记录标记，之后返回 false。
+ * 超过 STATE_MAX_AGE_MS 的旧会话标记文件会顺带清理。
+ */
+export function isFirstCodeWrite(sessionId, stateDir = STATE_DIR) {
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = Date.now();
+  for (const name of fs.readdirSync(stateDir)) {
+    const file = path.join(stateDir, name);
+    // 并发会话可能刚删掉这个文件。
+    const stat = fs.statSync(file, { throwIfNoEntry: false });
+    if (stat && now - stat.mtimeMs > STATE_MAX_AGE_MS) fs.rmSync(file, { force: true });
+  }
+  const stateFile = sessionStateFile(sessionId, stateDir);
+  if (fs.existsSync(stateFile)) return false;
+  fs.writeFileSync(stateFile, '1', 'utf8');
+  return true;
+}
+
+/** 清除会话的已提醒标记，使该会话下一次源码写入重新触发门禁。 */
+export function resetSessionGate(sessionId, stateDir = STATE_DIR) {
+  fs.rmSync(sessionStateFile(sessionId, stateDir), { force: true });
 }
 
 async function readStdin() {
@@ -88,10 +92,31 @@ async function readStdin() {
 
 async function main() {
   const input = JSON.parse(await readStdin());
-  const reminder = pickReminder(input.tool_name, input.tool_input ?? {});
-  if (reminder) {
-    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: reminder } }));
+  // Antigravity 的输入带 conversationId，PreToolUse 带 toolCall，SessionStart 不带 toolCall。
+  const isAntigravity = input.conversationId !== undefined;
+  if (isAntigravity) {
+    if (input.toolCall === undefined) {
+      resetSessionGate(input.conversationId);
+      process.stdout.write('{}');
+      return;
+    }
+    const shouldBlock =
+      hasCodeWrite(input.toolCall.name, input.toolCall.args ?? {}) && isFirstCodeWrite(input.conversationId);
+    process.stdout.write(JSON.stringify(shouldBlock ? { decision: 'deny', reason: REMINDER } : { decision: 'allow' }));
+    return;
   }
+
+  const sessionId = input.session_id ?? 'unknown';
+  if (input.hook_event_name === 'SessionStart') {
+    resetSessionGate(sessionId);
+    return;
+  }
+
+  const shouldBlock = hasCodeWrite(input.tool_name, input.tool_input ?? {}) && isFirstCodeWrite(sessionId);
+  if (!shouldBlock) return;
+  // 退出码 2 让 Claude Code 和 Codex 拦下这次调用，并把 stderr 交给 Agent。
+  process.stderr.write(REMINDER);
+  process.exitCode = 2;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

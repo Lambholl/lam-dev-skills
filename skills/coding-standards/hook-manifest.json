@@ -2,9 +2,17 @@
   "script": "scripts/hooks/coding-standards-hook.mjs",
   "events": [
     {
-      "event": "PostToolUse",
-      "matcher": { "claude": "Write|Edit|MultiEdit|NotebookEdit", "codex": "apply_patch" },
-      "statusMessage": "Checking comments"
+      "event": "SessionStart",
+      "statusMessage": "Resetting coding standards gate"
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": {
+        "claude": "Write|Edit|MultiEdit|NotebookEdit",
+        "codex": "apply_patch",
+        "agy": "write_file|edit_file"
+      },
+      "statusMessage": "Checking coding standards"
     }
   ]
 }

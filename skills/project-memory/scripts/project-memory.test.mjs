@@ -49,13 +49,17 @@ test('目录放在第一个二级标题前，已是最新时内容不变，章�
   assert.equal(upsertToc(tocFirst), '# 标题\n\n## 目录\n\n- [甲](#甲)\n- [乙](#乙)\n\n说明。\n\n## 甲\n\n## 乙\n');
 });
 
-test('init 建出的记忆目录通过校验，再次 init 不覆盖', () => {
+test('init 建出的记忆目录和 AGENTS.md 通过校验，已有文件不覆盖', () => {
   withProject((project, memory) => {
-    assert.equal(run('init', '--project', project).status, 0);
+    const created = run('init', '--project', project);
+    assert.equal(created.status, 0);
     const index = fs.readFileSync(path.join(memory, 'INDEX.md'), 'utf8');
     assert.match(index, /\| `requirements\/product.md` \| 产品需求 \| draft \| 需求 \|/);
     assert.doesNotMatch(index, /ADR-0001-template/);
     assert.doesNotMatch(fs.readFileSync(path.join(memory, 'project', 'charter.md'), 'utf8'), /\{\{TODAY\}\}/);
+    const agents = fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8');
+    assert.match(agents, /coding-standards/);
+    assert.match(agents, /project-memory/);
     const validate = run('validate', '--project', project);
     assert.equal(validate.status, 0, validate.stdout);
     assert.match(validate.stdout, /没有发现问题/);
@@ -66,6 +70,15 @@ test('init 建出的记忆目录通过校验，再次 init 不覆盖', () => {
     assert.equal(again.status, 1);
     assert.match(again.stderr, /已存在/);
     assert.equal(fs.readFileSync(path.join(memory, 'INDEX.md'), 'utf8'), 'changed');
+  });
+
+  withProject((project) => {
+    const agentsPath = path.join(project, 'AGENTS.md');
+    fs.writeFileSync(agentsPath, '# Custom\n');
+    const res = run('init', '--project', project);
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /已存在，未改动/);
+    assert.equal(fs.readFileSync(agentsPath, 'utf8'), '# Custom\n');
   });
 });
 
