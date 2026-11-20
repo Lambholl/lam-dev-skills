@@ -24,15 +24,15 @@ cd lam-dev-skills
 npm run install-skills
 ```
 
-`install` 把每个技能链接到对应平台的用户级技能目录，再把 Hook 合并进用户级配置。配置里已有的其他 Hook 和设置不动，改之前先备份成 `<文件>.bak-<时间>`。
+`install` 把技能配置到对应平台（Claude Code 和 Codex 链接到用户级技能目录，Antigravity 写入 `skills.json`），再把 Hook 合并进用户级配置。配置里已有的其他条目、Hook 和设置不动，改之前先备份成 `<文件>.bak-<时间>`。
 
-| 平台参数 | 工具 | 技能目录 | Hook 配置与支持范围 |
+| 平台参数 | 工具 | 技能位置 | Hook 配置与支持范围 |
 | --- | --- | --- | --- |
 | `claude` | Claude Code | `~/.claude/skills/` | `~/.claude/settings.json`（全部 4 个技能） |
 | `codex` | Codex | `~/.codex/skills/` | `~/.codex/hooks.json`（全部 4 个技能） |
-| `agy` | Antigravity | `~/.gemini/config/skills/` | `~/.gemini/config/hooks.json`（`coding-standards`、`git-workflow`、`project-memory`；Antigravity 不支持 `PostToolUse` 注入上下文） |
+| `agy` | Antigravity | `~/.gemini/config/skills.json` | `~/.gemini/config/hooks.json`（`coding-standards`、`git-workflow`、`project-memory`；Antigravity 不支持 `PostToolUse` 注入上下文） |
 
-技能是链接，`git pull` 后直接生效。Hook 命令写的是仓库的绝对路径，要移动仓库时先 `uninstall`，移好后再 `install`。
+技能指向本仓库，`git pull` 后直接生效。Antigravity 的 `skills.json` 和所有平台的 Hook 命令写的都是仓库的绝对路径，要移动仓库时先 `uninstall`，移好后再 `install`。
 
 Codex 对新加或改过的 Hook 要先信任才执行。安装后在 Codex 里运行 `/hooks` 审阅并信任。
 

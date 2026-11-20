@@ -71,8 +71,9 @@ test('install 链接技能、合并 Hook、保留其他配置并先备份；重�
     for (const name of SKILLS) {
       assert.equal(fs.realpathSync(path.join(claudeDir, 'skills', name)), fs.realpathSync(path.join(REPO_ROOT, 'skills', name)));
       assert.ok(fs.existsSync(path.join(home, '.codex', 'skills', name, 'SKILL.md')));
-      assert.ok(fs.existsSync(path.join(agyDir(home), 'skills', name, 'SKILL.md')));
     }
+    const agySkills = readJson(path.join(agyDir(home), 'skills.json'));
+    assert.deepEqual(agySkills, { entries: [{ path: path.join(REPO_ROOT, 'skills').replaceAll('\\', '/') }] });
 
     const claude = readJson(path.join(claudeDir, 'settings.json'));
     assert.equal(claude.model, 'x');
@@ -143,10 +144,10 @@ test('status 列出链接和 Hook，Codex 标出要审阅信任，平台不支�
     }
     assert.ok(lines.some((line) => line.includes('git-workflow') && line.includes('需在 Codex 里审阅信任')));
     // Antigravity 的 PostToolUse 不能给 Agent 注入上下文，dev-writing Hook 不装。
-    assert.deepEqual(result.agy['coding-standards'], { link: 'linked', hook: 'configured' });
-    assert.deepEqual(result.agy['git-workflow'], { link: 'linked', hook: 'configured' });
-    assert.deepEqual(result.agy['project-memory'], { link: 'linked', hook: 'configured' });
-    assert.deepEqual(result.agy['dev-writing'], { link: 'linked', hook: 'unsupported' });
+    assert.deepEqual(result.agy['coding-standards'], { link: 'registered', hook: 'configured' });
+    assert.deepEqual(result.agy['git-workflow'], { link: 'registered', hook: 'configured' });
+    assert.deepEqual(result.agy['project-memory'], { link: 'registered', hook: 'configured' });
+    assert.deepEqual(result.agy['dev-writing'], { link: 'registered', hook: 'unsupported' });
   });
 });
 
@@ -159,7 +160,7 @@ test('uninstall 只删本仓库的链接和 Hook', () => {
     uninstall({ home, platforms: ALL_PLATFORMS, log: quiet });
     assert.deepEqual(fs.readdirSync(path.join(claudeDir, 'skills')), ['other']);
     assert.deepEqual(fs.readdirSync(path.join(home, '.codex', 'skills')), []);
-    assert.deepEqual(fs.readdirSync(path.join(agyDir(home), 'skills')), []);
+    assert.deepEqual(readJson(path.join(agyDir(home), 'skills.json')), {});
     assert.deepEqual(readJson(path.join(claudeDir, 'settings.json')), { model: 'x', hooks: { PreToolUse: [FOREIGN_HOOK] } });
     assert.deepEqual(readJson(path.join(home, '.codex', 'hooks.json')), {});
     assert.deepEqual(readJson(path.join(agyDir(home), 'hooks.json')), { 'custom-guard': FOREIGN_AGY_GROUP });

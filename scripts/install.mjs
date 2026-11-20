@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 把本仓库的技能链接到 Claude Code、Codex、Antigravity 的用户级技能目录，并把各技能的 Hook 合并进用户级配置。
+// 把本仓库的技能安装到 Claude Code、Codex、Antigravity，并把各技能的 Hook 合并进用户级配置。
 // 用法：node scripts/install.mjs install|status|uninstall [--platform all|claude|codex|agy] [--dry-run]
 
 import fs from 'node:fs';
@@ -26,7 +26,7 @@ export const PLATFORMS = {
   },
   agy: {
     label: 'Antigravity',
-    skillsDir: '.gemini/config/skills',
+    skillsConfig: '.gemini/config/skills.json',
     config: '.gemini/config/hooks.json',
     detect: (home) => fs.existsSync(path.join(home, '.gemini', 'config')) || fs.existsSync(path.join(home, '.gemini', 'antigravity'))
   }
@@ -232,8 +232,40 @@ export function linkState(link, target) {
   }
 }
 
+function isSameSkillsPath(entryPath, targetDir) {
+  if (typeof entryPath !== 'string' || !entryPath.trim()) return false;
+  const resolved = toPosix(path.resolve(entryPath)).replace(/\/+$/, '');
+  const target = toPosix(path.resolve(targetDir)).replace(/\/+$/, '');
+  return process.platform === 'win32' ? resolved.toLowerCase() === target.toLowerCase() : resolved === target;
+}
+
+function removeOwnSkillsConfig(config, repoRoot = REPO_ROOT) {
+  const next = structuredClone(config);
+  const targetDir = path.join(repoRoot, 'skills');
+  if (Array.isArray(next.entries)) {
+    next.entries = next.entries.filter((entry) => !isSameSkillsPath(entry?.path, targetDir));
+    if (!next.entries.length) delete next.entries;
+  }
+  return next;
+}
+
+function mergeSkillsConfig(config, repoRoot = REPO_ROOT) {
+  const next = removeOwnSkillsConfig(config, repoRoot);
+  (next.entries ??= []).push({ path: toPosix(path.join(repoRoot, 'skills')) });
+  return next;
+}
+
+function hasOwnSkillsConfig(config, repoRoot = REPO_ROOT) {
+  const targetDir = path.join(repoRoot, 'skills');
+  return Array.isArray(config.entries) && config.entries.some((entry) => isSameSkillsPath(entry?.path, targetDir));
+}
+
 function skillsDir(home, platform) {
   return path.join(home, ...PLATFORMS[platform].skillsDir.split('/'));
+}
+
+function skillsConfigFile(home, platform) {
+  return path.join(home, ...PLATFORMS[platform].skillsConfig.split('/'));
 }
 
 function configFile(home, platform) {
@@ -258,26 +290,33 @@ function collectHandlers(config, platform) {
   return Object.values(config.hooks ?? {}).flat().flatMap((group) => group?.hooks ?? []);
 }
 
-/** 链接技能并合并 Hook。返回各平台是否改了 Hook 配置，以及有冲突的链接路径。 */
+/** 安装技能并合并 Hook。返回各平台是否改了 Hook 配置，以及有冲突的链接路径。 */
 export function install({ home = os.homedir(), platforms, dryRun = false, repoRoot = REPO_ROOT, log = console.log }) {
   const skills = listSkills(repoRoot);
   const result = { conflicts: [], hooksChanged: {} };
   for (const platform of platforms) {
     log(`${PLATFORMS[platform].label}:`);
-    for (const skill of skills) {
-      const link = path.join(skillsDir(home, platform), skill.name);
-      const state = linkState(link, skill.dir);
-      if (state === 'linked') continue;
-      if (state === 'conflict') {
-        result.conflicts.push(link);
-        log(`  冲突：${link} 已存在且不是本仓库的链接，没有改动。确认不再需要后删掉它，再运行 install`);
-        continue;
+    if (PLATFORMS[platform].skillsConfig) {
+      // Antigravity 在 Windows 上会跳过 skills/ 下的 NTFS Junction，因此通过 skills.json 注册物理目录。
+      const skillsFile = skillsConfigFile(home, platform);
+      const hasSkillsChanged = writeConfig(skillsFile, mergeSkillsConfig(readConfig(skillsFile), repoRoot), dryRun, log);
+      log(`  技能配置${hasSkillsChanged ? (dryRun ? '将更新' : '已更新') : '没有变化'}：${skillsFile}`);
+    } else {
+      for (const skill of skills) {
+        const link = path.join(skillsDir(home, platform), skill.name);
+        const state = linkState(link, skill.dir);
+        if (state === 'linked') continue;
+        if (state === 'conflict') {
+          result.conflicts.push(link);
+          log(`  冲突：${link} 已存在且不是本仓库的链接，没有改动。确认不再需要后删掉它，再运行 install`);
+          continue;
+        }
+        if (!dryRun) {
+          fs.mkdirSync(path.dirname(link), { recursive: true });
+          fs.symlinkSync(skill.dir, link, 'junction');
+        }
+        log(`  ${dryRun ? '将链接' : '已链接'} ${link}`);
       }
-      if (!dryRun) {
-        fs.mkdirSync(path.dirname(link), { recursive: true });
-        fs.symlinkSync(skill.dir, link, 'junction');
-      }
-      log(`  ${dryRun ? '将链接' : '已链接'} ${link}`);
     }
     const file = configFile(home, platform);
     const changed = writeConfig(file, mergeHooks(readConfig(file), platform, skills, repoRoot), dryRun, log);
@@ -288,16 +327,24 @@ export function install({ home = os.homedir(), platforms, dryRun = false, repoRo
   return result;
 }
 
-/** 删掉指向本仓库的技能链接和本仓库的 Hook，其他内容不动。 */
+/** 删掉本仓库的技能配置或链接以及本仓库的 Hook，其他内容不动。 */
 export function uninstall({ home = os.homedir(), platforms, dryRun = false, repoRoot = REPO_ROOT, log = console.log }) {
   const skills = listSkills(repoRoot);
   for (const platform of platforms) {
     log(`${PLATFORMS[platform].label}:`);
-    for (const skill of skills) {
-      const link = path.join(skillsDir(home, platform), skill.name);
-      if (linkState(link, skill.dir) !== 'linked') continue;
-      if (!dryRun) fs.unlinkSync(link);
-      log(`  ${dryRun ? '将删除' : '已删除'}链接 ${link}`);
+    if (PLATFORMS[platform].skillsConfig) {
+      const skillsFile = skillsConfigFile(home, platform);
+      if (fs.existsSync(skillsFile)) {
+        const hasSkillsChanged = writeConfig(skillsFile, removeOwnSkillsConfig(readConfig(skillsFile), repoRoot), dryRun, log);
+        log(`  技能配置${hasSkillsChanged ? (dryRun ? '将更新' : '已更新') : '没有本仓库的条目'}：${skillsFile}`);
+      }
+    } else {
+      for (const skill of skills) {
+        const link = path.join(skillsDir(home, platform), skill.name);
+        if (linkState(link, skill.dir) !== 'linked') continue;
+        if (!dryRun) fs.unlinkSync(link);
+        log(`  ${dryRun ? '将删除' : '已删除'}链接 ${link}`);
+      }
     }
     const file = configFile(home, platform);
     if (!fs.existsSync(file)) continue;
@@ -306,23 +353,32 @@ export function uninstall({ home = os.homedir(), platforms, dryRun = false, repo
   }
 }
 
-/** 列出各平台每个技能的链接和 Hook 状态，返回同样内容的结构化结果。 */
+/** 列出各平台每个技能的安装和 Hook 状态，返回同样内容的结构化结果。 */
 export function status({ home = os.homedir(), platforms, repoRoot = REPO_ROOT, log = console.log }) {
   const skills = listSkills(repoRoot);
   const result = {};
   for (const platform of platforms) {
     log(`${PLATFORMS[platform].label}:`);
     const handlers = collectHandlers(readConfig(configFile(home, platform)), platform);
+    const hasSkillsConfig = Boolean(PLATFORMS[platform].skillsConfig);
+    const hasRegisteredSkills = hasSkillsConfig && hasOwnSkillsConfig(readConfig(skillsConfigFile(home, platform)), repoRoot);
     result[platform] = {};
     for (const skill of skills) {
-      const link = linkState(path.join(skillsDir(home, platform), skill.name), skill.dir);
+      const link = hasSkillsConfig
+        ? (hasRegisteredSkills ? 'registered' : 'missing')
+        : linkState(path.join(skillsDir(home, platform), skill.name), skill.dir);
       const script = toPosix(path.join(skill.dir, skill.manifest?.script ?? '')).toLowerCase();
       let hook;
       if (!skill.manifest) hook = 'none';
       else if (!skillSupportsPlatformHook(skill, platform)) hook = 'unsupported';
       else hook = handlers.some((handler) => typeof handler.command === 'string' && toPosix(handler.command).toLowerCase().includes(script)) ? 'configured' : 'missing';
       result[platform][skill.name] = { link, hook };
-      const linkText = { linked: '已链接', missing: '未链接', conflict: '冲突（同名目录不是本仓库的链接）' }[link];
+      const linkText = {
+        linked: '已链接',
+        registered: '已通过 skills.json 注册',
+        missing: hasSkillsConfig ? '未注册' : '未链接',
+        conflict: '冲突（同名目录不是本仓库的链接）'
+      }[link];
       const hookText = {
         none: '无 Hook',
         unsupported: `${PLATFORMS[platform].label} 不支持这个 Hook 用的事件`,
