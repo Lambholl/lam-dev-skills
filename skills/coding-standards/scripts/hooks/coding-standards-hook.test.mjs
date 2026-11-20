@@ -87,7 +87,7 @@ test('Claude Code 拦截首次与并行源码写入，非源码和临时脚本�
   const codeInput = { hook_event_name: 'PreToolUse', session_id: sessionId, tool_name: 'Edit', tool_input: { file_path: 'src/a.ts' } };
   const first = runHook(codeInput);
   assert.equal(first.status, 2);
-  assert.match(first.stderr, /编码与注释规范门禁/);
+  assert.match(first.stderr, /用 Skill 工具调用 coding-standards 技能/);
 
   // 紧接着的并行写入仍在 PARALLEL_WINDOW_MS 内，继续拦截。
   const parallel = runHook(codeInput);
@@ -99,7 +99,21 @@ test('Claude Code 拦截首次与并行源码写入，非源码和临时脚本�
 
   const afterCompact = runHook(codeInput);
   assert.equal(afterCompact.status, 2);
-  assert.match(afterCompact.stderr, /coding-standards/);
+  assert.match(afterCompact.stderr, /上下文刚压缩过/);
+});
+
+test('Codex 压缩后仍要求完整读取技能', () => {
+  const sessionId = `cs-codex-${process.pid}-${Date.now()}`;
+  runHook({ hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId });
+  const result = runHook({
+    hook_event_name: 'PreToolUse',
+    session_id: sessionId,
+    tool_name: 'apply_patch',
+    tool_input: patch('*** Update File: src/a.ts', '@@', '+const x = 1;')
+  });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /必须先完整读取 coding-standards 技能/);
+  assert.doesNotMatch(result.stderr, /Skill 工具/);
 });
 
 test('Antigravity 排除文档和临时脚本，拦截首次与并行源码写入，SessionStart 后重置门禁', () => {
@@ -120,6 +134,7 @@ test('Antigravity 排除文档和临时脚本，拦截首次与并行源码写�
   const firstOut = JSON.parse(first.stdout);
   assert.equal(firstOut.decision, 'deny');
   assert.match(firstOut.reason, /编码与注释规范门禁/);
+  assert.doesNotMatch(firstOut.reason, /Skill 工具/);
 
   // 紧接着的并行写入仍在 PARALLEL_WINDOW_MS 内，继续拦截。
   assert.equal(JSON.parse(runHook(codeInput).stdout).decision, 'deny');
