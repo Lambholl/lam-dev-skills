@@ -1,4 +1,4 @@
-此项目依赖 `project-memory`、`coding-standards`、`git-workflow`、`dev-writing` 四个技能；未读取对应技能前禁止修改项目。执行下表中的操作前（以及长会话发生上下文压缩后继续修改前），必须先读取对应技能的规则：
+此项目依赖 `project-memory`、`coding-standards`、`git-workflow`、`dev-writing` 四个技能；未读取对应技能前禁止修改项目。执行下表中的操作前（以及长会话发生上下文压缩后继续修改前），必须完整读取对应技能和相关规范文件（禁止截断或只看片段）：
 
 | 技能 | 什么时候必须读 |
 | --- | --- |

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// coding-standards 技能的 PreToolUse / SessionStart Hook：同一会话首次写入或修改源码前（以及上下文压缩后）拦下一次，提醒先读取规范。
-// 提醒必须在修改源码前送到 Agent，所以用退出码 2（Antigravity 用 deny JSON）拦下一次，重试即放行。
+// coding-standards 技能的 PreToolUse / SessionStart Hook：同一会话首次写入或修改项目源码前（以及上下文压缩后）拦下，提醒完整读取规范。
+// 并行窗口内继续拦截以防同一批并发写入穿透；窗口过后重试放行。
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -9,17 +9,39 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const REMINDER =
-  '编码与注释规范门禁（coding-standards 技能）：首次修改源码或上下文压缩后，必须先读取 coding-standards 技能、对应语言/框架规则以及项目 standards/coding.md（没有则看 AGENTS.md / CLAUDE.md）。读完后重试本次写入即可放行，同会话后续写入不再拦截；批量改完源码、报告完成或提交前，对照 diff 按技能“注释自检”核对全部新增和修改的注释。';
+  '编码与注释规范门禁（coding-standards 技能）：首次修改项目源码或上下文压缩后，必须先完整读取 coding-standards 技能、对应语言/框架规则以及项目 standards/coding.md（没有则看 AGENTS.md / CLAUDE.md），禁止截断读取。读完后重试本次写入即可放行，同会话后续写入不再拦截；批量改完源码、报告完成或提交前，按技能“注释自检”核对 git diff HEAD 及新建源码文件的全部注释。';
 
 const STATE_DIR = path.join(os.tmpdir(), 'lam-coding-standards-hook');
 const STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const PARALLEL_WINDOW_MS = 3000;
 
-// 文档和数据文件不按源码拦截。
-const NON_CODE_FILE = /\.(md|mdx|markdown|txt|json|jsonc|lock|csv|tsv|log|svg)$/i;
+// 文档、配置和数据文件不按源码拦截。
+const NON_CODE_FILE = /\.(md|mdx|markdown|txt|json|jsonc|lock|csv|tsv|log|svg|yml|yaml|toml|ini|html|css)$/i;
+// 一次性分析/调试脚本目录不按项目源码拦截。
+const TEMP_SEGMENT = /(?:^|\/)(?:scratchpad|\.gemini\/antigravity\/brain)(?:\/|$)|^\/tmp(?:\/|$)/i;
 
-/** 路径指向源码文件时返回 true；文档、数据文件和空路径返回 false。 */
-export function isCodeFile(filePath) {
-  return Boolean(filePath) && !NON_CODE_FILE.test(filePath);
+function toPosix(value) {
+  return String(value).replaceAll('\\', '/');
+}
+
+/** 路径位于系统临时目录或一次性工作区时返回 true。 */
+export function isTempPath(filePath, tmpDir = os.tmpdir()) {
+  if (!filePath) return false;
+  const normalized = toPosix(filePath);
+  if (TEMP_SEGMENT.test(normalized)) return true;
+  if (!path.isAbsolute(filePath)) return false;
+  const resolved = path.resolve(filePath);
+  const resolvedTmp = path.resolve(tmpDir);
+  const prefix = resolvedTmp.endsWith(path.sep) ? resolvedTmp : `${resolvedTmp}${path.sep}`;
+  if (process.platform === 'win32') {
+    return resolved.toLowerCase().startsWith(prefix.toLowerCase());
+  }
+  return resolved.startsWith(prefix);
+}
+
+/** 路径指向项目源码文件时返回 true；文档、配置、数据文件、临时路径和空路径返回 false。 */
+export function isCodeFile(filePath, tmpDir = os.tmpdir()) {
+  return Boolean(filePath) && !NON_CODE_FILE.test(filePath) && !isTempPath(filePath, tmpDir);
 }
 
 /**
@@ -44,37 +66,66 @@ export function parsePatchPaths(patch) {
   return paths;
 }
 
-/** 本次工具调用会写入或修改至少一个源码文件时返回 true。 */
-export function hasCodeWrite(toolName, toolInput) {
+/** 本次工具调用会写入或修改至少一个项目源码文件时返回 true。 */
+export function hasCodeWrite(toolName, toolInput, tmpDir = os.tmpdir()) {
   if (toolName === 'apply_patch') {
-    return parsePatchPaths(String(toolInput.command ?? '')).some(isCodeFile);
+    return parsePatchPaths(String(toolInput.command ?? '')).some((filePath) => isCodeFile(filePath, tmpDir));
   }
   const filePath = toolInput.file_path ?? toolInput.notebook_path ?? toolInput.Path ?? toolInput.path ?? '';
-  return isCodeFile(String(filePath));
+  return isCodeFile(String(filePath), tmpDir);
 }
 
 function sessionStateFile(sessionId, stateDir) {
   const key = crypto.createHash('sha256').update(String(sessionId)).digest('hex').slice(0, 16);
-  return path.join(stateDir, `${key}.mark`);
+  return path.join(stateDir, `${key}.json`);
 }
 
-/**
- * 同一会话首次调用时返回 true 并记录标记，之后返回 false。
- * 超过 STATE_MAX_AGE_MS 的旧会话标记文件会顺带清理。
- */
-export function isFirstCodeWrite(sessionId, stateDir = STATE_DIR) {
+function pruneOldState(stateDir, now) {
   fs.mkdirSync(stateDir, { recursive: true });
-  const now = Date.now();
   for (const name of fs.readdirSync(stateDir)) {
     const file = path.join(stateDir, name);
     // 并发会话可能刚删掉这个文件。
     const stat = fs.statSync(file, { throwIfNoEntry: false });
     if (stat && now - stat.mtimeMs > STATE_MAX_AGE_MS) fs.rmSync(file, { force: true });
   }
-  const stateFile = sessionStateFile(sessionId, stateDir);
-  if (fs.existsSync(stateFile)) return false;
-  fs.writeFileSync(stateFile, '1', 'utf8');
-  return true;
+}
+
+function loadState(sessionId, stateDir) {
+  const file = sessionStateFile(sessionId, stateDir);
+  if (!fs.existsSync(file)) return { unlocked: false, blockedAt: null };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return {
+      unlocked: Boolean(parsed.unlocked),
+      blockedAt: typeof parsed.blockedAt === 'number' ? parsed.blockedAt : null
+    };
+  } catch {
+    return { unlocked: false, blockedAt: null };
+  }
+}
+
+function saveState(sessionId, state, stateDir, now) {
+  pruneOldState(stateDir, now);
+  fs.writeFileSync(sessionStateFile(sessionId, stateDir), JSON.stringify(state), 'utf8');
+}
+
+/**
+ * 判断本次源码写入是否应拦截。
+ * 首次调用及 parallelWindowMs 内的并发重试返回 true；窗口过后重试解锁并返回 false。
+ */
+export function shouldBlockCodeWrite(
+  sessionId,
+  { stateDir = STATE_DIR, now = Date.now(), parallelWindowMs = PARALLEL_WINDOW_MS } = {}
+) {
+  const state = loadState(sessionId, stateDir);
+  if (state.unlocked) return false;
+  if (state.blockedAt === null) {
+    saveState(sessionId, { unlocked: false, blockedAt: now }, stateDir, now);
+    return true;
+  }
+  if (now - state.blockedAt < parallelWindowMs) return true;
+  saveState(sessionId, { unlocked: true, blockedAt: null }, stateDir, now);
+  return false;
 }
 
 /** 清除会话的已提醒标记，使该会话下一次源码写入重新触发门禁。 */
@@ -101,7 +152,7 @@ async function main() {
       return;
     }
     const shouldBlock =
-      hasCodeWrite(input.toolCall.name, input.toolCall.args ?? {}) && isFirstCodeWrite(input.conversationId);
+      hasCodeWrite(input.toolCall.name, input.toolCall.args ?? {}) && shouldBlockCodeWrite(input.conversationId);
     process.stdout.write(JSON.stringify(shouldBlock ? { decision: 'deny', reason: REMINDER } : { decision: 'allow' }));
     return;
   }
@@ -112,7 +163,7 @@ async function main() {
     return;
   }
 
-  const shouldBlock = hasCodeWrite(input.tool_name, input.tool_input ?? {}) && isFirstCodeWrite(sessionId);
+  const shouldBlock = hasCodeWrite(input.tool_name, input.tool_input ?? {}) && shouldBlockCodeWrite(sessionId);
   if (!shouldBlock) return;
   // 退出码 2 让 Claude Code 和 Codex 拦下这次调用，并把 stderr 交给 Agent。
   process.stderr.write(REMINDER);
