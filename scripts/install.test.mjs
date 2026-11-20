@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { ANTIGRAVITY_HOOK_KEY, REPO_ROOT, install, listSkills, selectPlatforms, status, uninstall } from './install.mjs';
+import { ANTIGRAVITY_HOOK_KEY, REPO_ROOT, install, listSkills, selectPlatforms, status, uninstall, upgrade } from './install.mjs';
 
 const SKILLS = ['coding-standards', 'dev-writing', 'git-workflow', 'project-memory'];
 const FOREIGN_HOOK = { matcher: 'Bash', hooks: [{ type: 'command', command: 'node other-hook.mjs' }] };
@@ -132,11 +132,37 @@ test('dry-run 不写任何文件', () => {
   });
 });
 
-test('status 列出链接和 Hook，Codex 标出要审阅信任，平台不支持的 Hook 事件标为 unsupported', () => {
+test('status 列出链接、Hook 过期状态和 unsupported；upgrade 只更新已安装平台', () => {
   withHome((home) => {
     const lines = [];
     assert.deepEqual(status({ home, platforms: ['claude'], log: quiet }).claude['git-workflow'], { link: 'missing', hook: 'missing' });
-    install({ home, platforms: ALL_PLATFORMS, log: quiet });
+    // 只给 claude 安装，codex 和 agy 有配置目录但未安装本仓库技能。
+    fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+    fs.mkdirSync(agyDir(home), { recursive: true });
+    install({ home, platforms: ['claude'], log: quiet });
+
+    // 模拟 coding-standards 的 Hook 配置停留在旧版本（matcher 缺少其他写入工具）。
+    const claudeSettings = path.join(home, '.claude', 'settings.json');
+    const stale = readJson(claudeSettings);
+    stale.hooks.PreToolUse = stale.hooks.PreToolUse.map((group) =>
+      group.hooks.some((h) => h.command.includes('coding-standards-hook')) ? { ...group, matcher: 'Write' } : group
+    );
+    fs.writeFileSync(claudeSettings, JSON.stringify(stale, null, 2));
+
+    const staleStatus = status({ home, platforms: ['claude'], log: quiet });
+    assert.equal(staleStatus.claude['coding-standards'].hook, 'outdated');
+    assert.equal(staleStatus.claude['git-workflow'].hook, 'configured');
+
+    // upgrade 只更新已安装的 claude，跳过未安装的 codex 和 agy。
+    const upgraded = upgrade({ home, platforms: ALL_PLATFORMS, log: quiet });
+    assert.deepEqual(upgraded.updated, ['claude']);
+    assert.deepEqual(upgraded.skipped, ['codex', 'agy']);
+    assert.equal(upgraded.hooksChanged.claude, true);
+    assert.equal(fs.existsSync(path.join(home, '.codex', 'hooks.json')), false);
+    assert.equal(fs.existsSync(path.join(agyDir(home), 'skills.json')), false);
+    assert.equal(status({ home, platforms: ['claude'], log: quiet }).claude['coding-standards'].hook, 'configured');
+
+    install({ home, platforms: ['codex', 'agy'], log: quiet });
     const result = status({ home, platforms: ALL_PLATFORMS, log: (line) => lines.push(line) });
     for (const name of SKILLS) {
       assert.deepEqual(result.claude[name], { link: 'linked', hook: 'configured' });

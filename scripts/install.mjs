@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 把本仓库的技能安装到 Claude Code、Codex、Antigravity，并把各技能的 Hook 合并进用户级配置。
-// 用法：node scripts/install.mjs install|status|uninstall [--platform all|claude|codex|agy] [--dry-run]
+// 用法：node scripts/install.mjs install|upgrade|status|uninstall [--platform all|claude|codex|agy] [--dry-run]
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -327,6 +327,75 @@ export function install({ home = os.homedir(), platforms, dryRun = false, repoRo
   return result;
 }
 
+function isSkillHandler(handler, script) {
+  return [handler?.command, handler?.commandWindows].some(
+    (value) => typeof value === 'string' && toPosix(value).toLowerCase().includes(script)
+  );
+}
+
+function collectSkillHookEntries(config, platform, script) {
+  const entries = [];
+  if (platform === 'agy') {
+    for (const spec of Object.values(config)) {
+      if (!spec || typeof spec !== 'object' || Array.isArray(spec)) continue;
+      for (const [eventName, list] of Object.entries(spec)) {
+        if (!Array.isArray(list)) continue;
+        for (const item of list) {
+          if (item && Array.isArray(item.hooks)) {
+            for (const handler of item.hooks) {
+              if (isSkillHandler(handler, script)) entries.push({ event: eventName, matcher: item.matcher ?? null, handler });
+            }
+          } else if (item && typeof item === 'object' && isSkillHandler(item, script)) {
+            entries.push({ event: eventName, matcher: null, handler: item });
+          }
+        }
+      }
+    }
+  } else {
+    for (const [eventName, groups] of Object.entries(config.hooks ?? {})) {
+      if (!Array.isArray(groups)) continue;
+      for (const group of groups) {
+        for (const handler of group?.hooks ?? []) {
+          if (isSkillHandler(handler, script)) entries.push({ event: eventName, matcher: group.matcher ?? null, handler });
+        }
+      }
+    }
+  }
+  return entries.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}
+
+function isPlatformInstalled(home, platform, skills, repoRoot) {
+  if (PLATFORMS[platform].skillsConfig) {
+    const skillsFile = skillsConfigFile(home, platform);
+    if (fs.existsSync(skillsFile) && hasOwnSkillsConfig(readConfig(skillsFile), repoRoot)) return true;
+  } else if (skills.some((skill) => linkState(path.join(skillsDir(home, platform), skill.name), skill.dir) === 'linked')) {
+    return true;
+  }
+  const file = configFile(home, platform);
+  if (!fs.existsSync(file)) return false;
+  return collectHandlers(readConfig(file), platform).some((handler) => isOwnHandler(handler, repoRoot));
+}
+
+/** 只更新已安装本仓库技能或 Hook 的平台，跳过未安装平台；返回更新结果与跳过的平台列表。 */
+export function upgrade({ home = os.homedir(), platforms, dryRun = false, repoRoot = REPO_ROOT, log = console.log }) {
+  const skills = listSkills(repoRoot);
+  const installed = [];
+  const skipped = [];
+  for (const platform of platforms) {
+    if (isPlatformInstalled(home, platform, skills, repoRoot)) installed.push(platform);
+    else skipped.push(platform);
+  }
+  if (!installed.length) {
+    log('没有已安装本仓库技能或 Hook 的平台，未改动。首次安装请运行 install。');
+    return { conflicts: [], hooksChanged: {}, updated: [], skipped };
+  }
+  const result = install({ home, platforms: installed, dryRun, repoRoot, log });
+  if (skipped.length) {
+    log(`已跳过未安装的平台：${skipped.map((platform) => PLATFORMS[platform].label).join('、')}`);
+  }
+  return { ...result, updated: installed, skipped };
+}
+
 /** 删掉本仓库的技能配置或链接以及本仓库的 Hook，其他内容不动。 */
 export function uninstall({ home = os.homedir(), platforms, dryRun = false, repoRoot = REPO_ROOT, log = console.log }) {
   const skills = listSkills(repoRoot);
@@ -359,7 +428,7 @@ export function status({ home = os.homedir(), platforms, repoRoot = REPO_ROOT, l
   const result = {};
   for (const platform of platforms) {
     log(`${PLATFORMS[platform].label}:`);
-    const handlers = collectHandlers(readConfig(configFile(home, platform)), platform);
+    const currentConfig = readConfig(configFile(home, platform));
     const hasSkillsConfig = Boolean(PLATFORMS[platform].skillsConfig);
     const hasRegisteredSkills = hasSkillsConfig && hasOwnSkillsConfig(readConfig(skillsConfigFile(home, platform)), repoRoot);
     result[platform] = {};
@@ -371,7 +440,12 @@ export function status({ home = os.homedir(), platforms, repoRoot = REPO_ROOT, l
       let hook;
       if (!skill.manifest) hook = 'none';
       else if (!skillSupportsPlatformHook(skill, platform)) hook = 'unsupported';
-      else hook = handlers.some((handler) => typeof handler.command === 'string' && toPosix(handler.command).toLowerCase().includes(script)) ? 'configured' : 'missing';
+      else {
+        const actual = collectSkillHookEntries(currentConfig, platform, script);
+        const expected = collectSkillHookEntries(mergeHooks({}, platform, [skill], repoRoot), platform, script);
+        if (!actual.length) hook = 'missing';
+        else hook = JSON.stringify(actual) === JSON.stringify(expected) ? 'configured' : 'outdated';
+      }
       result[platform][skill.name] = { link, hook };
       const linkText = {
         linked: '已链接',
@@ -383,6 +457,7 @@ export function status({ home = os.homedir(), platforms, repoRoot = REPO_ROOT, l
         none: '无 Hook',
         unsupported: `${PLATFORMS[platform].label} 不支持这个 Hook 用的事件`,
         missing: 'Hook 未安装',
+        outdated: 'Hook 配置已过期，运行 npm run upgrade 更新',
         configured: platform === 'codex' ? 'Hook 已写入配置，需在 Codex 里审阅信任' : 'Hook 已写入配置'
       }[hook];
       log(`  ${skill.name}：${linkText}；${hookText}`);
@@ -411,7 +486,7 @@ function parseCliArgs(argv, env = process.env) {
   });
   if (values.help) return { isHelp: true };
   const [action, ...extraPositionals] = positionals;
-  if (!['install', 'status', 'uninstall'].includes(action)) return { isHelp: false, action: undefined };
+  if (!['install', 'upgrade', 'status', 'uninstall'].includes(action)) return { isHelp: false, action: undefined };
 
   const npmScript = env.npm_lifecycle_event && (!env.npm_lifecycle_script || env.npm_lifecycle_script.includes('install.mjs'))
     ? env.npm_lifecycle_event
@@ -450,7 +525,7 @@ function parseCliArgs(argv, env = process.env) {
 function main(argv, env = process.env) {
   const parsed = parseCliArgs(argv, env);
   if (parsed.isHelp || !parsed.action) {
-    console.log(`用法：node scripts/install.mjs install|status|uninstall [--platform all|${Object.keys(PLATFORMS).join('|')}] [--dry-run]`);
+    console.log(`用法：node scripts/install.mjs install|upgrade|status|uninstall [--platform all|${Object.keys(PLATFORMS).join('|')}] [--dry-run]`);
     return parsed.isHelp ? 0 : 1;
   }
   const home = os.homedir();
@@ -461,6 +536,7 @@ function main(argv, env = process.env) {
   }
   const options = { home, platforms, dryRun: parsed.isDryRun };
   if (parsed.action === 'install') return install(options).conflicts.length ? 1 : 0;
+  if (parsed.action === 'upgrade') return upgrade(options).conflicts.length ? 1 : 0;
   if (parsed.action === 'uninstall') uninstall(options);
   else status(options);
   return 0;

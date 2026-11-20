@@ -32,7 +32,11 @@ npm run install-skills
 | `codex` | Codex | `~/.codex/skills/` | `~/.codex/hooks.json`（全部 4 个技能） |
 | `agy` | Antigravity | `~/.gemini/config/skills.json` | `~/.gemini/config/hooks.json`（`coding-standards`、`git-workflow`、`project-memory`；Antigravity 不支持 `PostToolUse` 注入上下文） |
 
-技能指向本仓库，`git pull` 后直接生效。Antigravity 的 `skills.json` 和所有平台的 Hook 命令写的都是仓库的绝对路径，要移动仓库时先 `uninstall`，移好后再 `install`。
+技能目录和 Hook 脚本直接指向本仓库，`git pull` 后技能规则与脚本逻辑立即生效；但 Hook 的触发时机和监听工具在安装时写入各平台配置文件，不会自动更新。仓库调整了 Hook 触发规则时，`npm run status` 会把本机配置标为“已过期”。
+
+拉取更新后运行 `npm run upgrade`，可把最新 Hook 配置和新增技能同步到已安装过的平台；`install-skills` 则会给系统中所有检测到的平台安装。
+
+Antigravity 的 `skills.json` 和所有平台的 Hook 命令写的都是仓库的绝对路径，要移动仓库时先 `uninstall`，移好后再 `install`。
 
 Codex 对新加或改过的 Hook 要先信任才执行。安装后在 Codex 里运行 `/hooks` 审阅并信任。
 
@@ -48,6 +52,9 @@ npm run install-skills -- --dry-run
 npm run install-skills -- --platform claude
 npm run install-skills -- --platform codex
 npm run install-skills -- --platform agy
+
+# 更新已安装平台的技能和 Hook
+npm run upgrade
 
 # 查看每个技能的链接和 Hook 状态
 npm run status
