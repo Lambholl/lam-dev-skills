@@ -82,10 +82,13 @@ test('install 链接技能、合并 Hook、保留其他配置并先备份；重�
     assert.match(claude.hooks.PreToolUse[1].hooks[0].command, /^node ".*\/skills\/coding-standards\/scripts\/hooks\/coding-standards-hook\.mjs"$/);
     assert.equal(claude.hooks.PreToolUse[2].matcher, 'Bash|PowerShell');
     assert.match(claude.hooks.PreToolUse[2].hooks[0].command, /^node ".*\/skills\/git-workflow\/scripts\/hooks\/git-workflow-hook\.mjs"$/);
-    assert.deepEqual(claude.hooks.PostToolUse.map((group) => group.matcher), ['Write|Edit|MultiEdit|NotebookEdit']);
+    assert.deepEqual(claude.hooks.PostToolUse.map((group) => group.matcher), [
+      'Skill|Read',
+      'Write|Edit|MultiEdit|NotebookEdit'
+    ]);
     assert.equal(claude.hooks.SessionStart.length, 2);
     assert.equal(claude.hooks.SessionStart[0].matcher, undefined);
-    assert.equal(claude.hooks.UserPromptSubmit.length, 1);
+    assert.equal(claude.hooks.UserPromptSubmit.length, 2);
     assert.equal(backups(claudeDir).length, 1);
 
     const codex = readJson(path.join(home, '.codex', 'hooks.json'));
@@ -94,13 +97,14 @@ test('install 链接技能、合并 Hook、保留其他配置并先备份；重�
     assert.equal(codexCommit.matcher, 'Bash');
     assert.equal(codexCommit.hooks[0].commandWindows, `${codexCommit.hooks[0].command}; exit $LASTEXITCODE`);
     assert.equal(codexCommit.hooks[0].statusMessage, 'Checking commit message');
-    assert.equal(codex.hooks.PostToolUse[0].matcher, 'apply_patch');
+    assert.deepEqual(codex.hooks.PostToolUse.map((group) => group.matcher), ['Bash', 'apply_patch']);
+    assert.equal(codex.hooks.UserPromptSubmit.length, 1);
 
     const agy = readJson(path.join(agyDir(home), 'hooks.json'));
     assert.deepEqual(agy['custom-guard'], FOREIGN_AGY_GROUP);
     const own = agy[ANTIGRAVITY_HOOK_KEY];
     assert.deepEqual(own.PreToolUse.map((group) => group.matcher), ['write_file|edit_file', 'run_command']);
-    assert.equal(own.PostToolUse, undefined);
+    assert.deepEqual(own.PostToolUse.map((group) => group.matcher), ['read_file']);
     assert.equal(own.SessionStart.length, 2);
     assert.equal(own.SessionStart[0].hooks, undefined);
     assert.equal(own.PreInvocation.length, 1);

@@ -84,6 +84,7 @@ function hookHandler(platform, skill, event) {
 }
 
 function skillSupportsEvent(event, platform) {
+  if (Array.isArray(event.platforms) && !event.platforms.includes(platform)) return false;
   return !event.matcher || Boolean(event.matcher[platform]);
 }
 

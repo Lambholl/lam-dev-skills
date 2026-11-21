@@ -7,33 +7,51 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
-  hasCodeWrite,
+  evaluateWriteGate,
+  inspectDocReads,
+  inspectPromptInvocation,
   isCodeFile,
+  isStaleHookConfig,
   isTempPath,
   parsePatchPaths,
-  resetSessionGate,
-  shouldBlockCodeWrite
+  recordReadOutcome,
+  requiredDocsForFile,
+  requiredDocsForWrite,
+  resetSessionGate
 } from './coding-standards-hook.mjs';
 
 const hookScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'coding-standards-hook.mjs');
 
-function runHook(input) {
-  return spawnSync(process.execPath, [hookScript], { input: JSON.stringify(input), encoding: 'utf8', windowsHide: true });
+function runHook(input, env = {}) {
+  return spawnSync(process.execPath, [hookScript], {
+    input: JSON.stringify(input),
+    encoding: 'utf8',
+    windowsHide: true,
+    env: { ...process.env, ...env }
+  });
 }
 
 function patch(...lines) {
   return { command: ['*** Begin Patch', ...lines, '*** End Patch'].join('\n') };
 }
 
-test('区分项目源码、文档、配置、数据文件和临时目录脚本', () => {
+test('只匹配明确的编程语言源码并排除临时目录脚本', () => {
   assert.equal(isCodeFile('src/app.ts'), true);
   assert.equal(isCodeFile('Main.java'), true);
   assert.equal(isCodeFile('script.py'), true);
-  assert.equal(isCodeFile('Dockerfile'), true);
+  assert.equal(isCodeFile('main.go'), true);
+  assert.equal(isCodeFile('App.kt'), true);
+
   assert.equal(isCodeFile('README.md'), false);
   assert.equal(isCodeFile('package.json'), false);
   assert.equal(isCodeFile('config.yaml'), false);
-  assert.equal(isCodeFile('notes.txt'), false);
+  assert.equal(isCodeFile('AndroidManifest.xml'), false);
+  assert.equal(isCodeFile('build.gradle'), false);
+  assert.equal(isCodeFile('build.gradle.kts'), false);
+  assert.equal(isCodeFile('schema.sql'), false);
+  assert.equal(isCodeFile('styles.css'), false);
+  assert.equal(isCodeFile('Dockerfile'), false);
+  assert.equal(isCodeFile('.editorconfig'), false);
   assert.equal(isCodeFile(''), false);
 
   assert.equal(isTempPath(path.join(os.tmpdir(), 'claude', 'probe.mjs')), true);
@@ -44,104 +62,357 @@ test('区分项目源码、文档、配置、数据文件和临时目录脚本',
   assert.equal(isCodeFile('src/tmp/helper.ts'), true);
 });
 
-test('识别各平台工具和 Codex 补丁里的源码写入', () => {
-  assert.equal(hasCodeWrite('Write', { file_path: 'src/a.ts' }), true);
-  assert.equal(hasCodeWrite('Edit', { file_path: 'docs/guide.md' }), false);
-  assert.equal(hasCodeWrite('Write', { file_path: path.join(os.tmpdir(), 'probe.ts') }), false);
-  assert.equal(hasCodeWrite('write_file', { Path: 'src/a.mjs' }), true);
-  assert.equal(hasCodeWrite('apply_patch', patch('*** Update File: a.ts', '@@', '+const x = 1;')), true);
-  assert.equal(hasCodeWrite('apply_patch', patch('*** Add File: a.md', '+hello')), false);
-  assert.equal(hasCodeWrite('apply_patch', patch('*** Update File: a.txt', '*** Move to: a.ts', '@@', '+x')), true);
+test('按语言、框架和项目 coding.md 映射必读规范，Codex 补丁忽略删除行', () => {
+  assert.deepEqual(requiredDocsForFile('src/a.ts'), [['SKILL.md'], ['languages/typescript.md']]);
+  assert.deepEqual(requiredDocsForFile('src/App.tsx'), [['SKILL.md'], ['languages/typescript.md'], ['frameworks/react.md']]);
+  assert.deepEqual(requiredDocsForFile('src/App.vue'), [['SKILL.md'], ['frameworks/vue.md']]);
+  assert.deepEqual(requiredDocsForFile('include/a.h'), [['SKILL.md'], ['languages/c.md', 'languages/cpp.md']]);
+  assert.deepEqual(requiredDocsForFile('cmd/main.go'), [['SKILL.md']]);
+  assert.deepEqual(requiredDocsForFile('AndroidManifest.xml'), []);
+
+  assert.deepEqual(
+    requiredDocsForWrite('apply_patch', patch('*** Update File: a.txt', '*** Move to: a.ts', '@@', '+x')),
+    [['SKILL.md'], ['languages/typescript.md']]
+  );
+  assert.deepEqual(requiredDocsForWrite('apply_patch', patch('*** Add File: a.md', '+hello')), []);
   assert.deepEqual(parsePatchPaths(patch('*** Delete File: a.ts').command), []);
+
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-proj-'));
+  try {
+    fs.mkdirSync(path.join(repo, '.project-memory', 'standards'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.project-memory', 'standards', 'coding.md'), '# coding');
+    fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+    assert.deepEqual(
+      requiredDocsForWrite('Write', { file_path: 'src/a.ts' }, { cwd: path.join(repo, 'src') }),
+      [['SKILL.md'], ['languages/typescript.md'], ['standards/coding.md']]
+    );
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
 });
 
-test('首次写源码和并行窗口内持续拦截，窗口过后放行，resetSessionGate 后重新生效', () => {
+test('识别三端完整读取、截断读取、失败读取和 Claude 斜杠命令', () => {
+  assert.deepEqual(inspectDocReads('Skill', { skill: 'coding-standards' }), {
+    unlocked: ['SKILL.md'],
+    truncated: [],
+    usedSkillTool: true
+  });
+  assert.deepEqual(inspectDocReads('Read', { file_path: 'C:/Users/x/.claude/skills/coding-standards/SKILL.md' }), {
+    unlocked: ['SKILL.md'],
+    truncated: [],
+    usedSkillTool: false
+  });
+  assert.deepEqual(
+    inspectDocReads('Read', { file_path: '/repo/.project-memory/standards/coding.md' }),
+    { unlocked: ['standards/coding.md'], truncated: [], usedSkillTool: false }
+  );
+  assert.deepEqual(
+    inspectDocReads('Read', { file_path: 'C:/Users/x/.claude/skills/coding-standards/SKILL.md', limit: 20 }),
+    { unlocked: [], truncated: ['SKILL.md'], usedSkillTool: false }
+  );
+  assert.deepEqual(
+    inspectDocReads('read_file', { Path: 'C:/repo/.project-memory/standards/coding.md' }),
+    { unlocked: ['standards/coding.md'], truncated: [], usedSkillTool: false }
+  );
+  assert.deepEqual(
+    inspectDocReads('read_file', { Path: 'C:/skills/coding-standards/references/languages/typescript.md', StartLine: 1, EndLine: 50 }),
+    { unlocked: [], truncated: ['languages/typescript.md'], usedSkillTool: false }
+  );
+  assert.deepEqual(
+    inspectDocReads('read_file', { Path: 'C:/skills/coding-standards/SKILL.md' }, { toolError: 'ENOENT' }),
+    { unlocked: [], truncated: [], usedSkillTool: false }
+  );
+  assert.deepEqual(
+    inspectDocReads('Bash', {
+      command:
+        'cd /c/Users/x/.codex/skills/coding-standards/references && cat languages/java.md languages/typescript.md frameworks/react.md'
+    }),
+    { unlocked: ['languages/java.md', 'languages/typescript.md', 'frameworks/react.md'], truncated: [], usedSkillTool: false }
+  );
+  assert.deepEqual(
+    inspectDocReads('Bash', {
+      command:
+        'cat ~/.codex/skills/coding-standards/SKILL.md | head -5; cat ~/.codex/skills/coding-standards/references/languages/typescript.md'
+    }),
+    { unlocked: ['languages/typescript.md'], truncated: ['SKILL.md'], usedSkillTool: false }
+  );
+  assert.deepEqual(
+    inspectDocReads(
+      'Bash',
+      { command: 'cat ~/.codex/skills/coding-standards/SKILL.md' },
+      { toolResponse: { exit_code: 1, output: 'cat: No such file or directory' } }
+    ),
+    { unlocked: [], truncated: [], usedSkillTool: false }
+  );
+
+  assert.deepEqual(inspectPromptInvocation('/coding-standards 请改代码'), ['SKILL.md']);
+  assert.deepEqual(inspectPromptInvocation('/lam-dev-skills:coding-standards'), ['SKILL.md']);
+  assert.deepEqual(inspectPromptInvocation('$coding-standards'), []);
+  assert.deepEqual(inspectPromptInvocation('请按 coding-standards 改代码'), []);
+});
+
+test('Claude 与 Antigravity 严格验读放行，Codex 截断不兜底、跨两轮且超时才兜底，压缩保留 Skill 工具状态', () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-hook-'));
   try {
-    assert.equal(shouldBlockCodeWrite('s1', { stateDir, now: 1000, parallelWindowMs: 3000 }), true);
-    assert.equal(shouldBlockCodeWrite('s1', { stateDir, now: 2500, parallelWindowMs: 3000 }), true);
-    assert.equal(shouldBlockCodeWrite('s1', { stateDir, now: 4500, parallelWindowMs: 3000 }), false);
-    assert.equal(shouldBlockCodeWrite('s1', { stateDir, now: 4600, parallelWindowMs: 3000 }), false);
-    assert.equal(shouldBlockCodeWrite('s2', { stateDir, now: 1000, parallelWindowMs: 3000 }), true);
-    resetSessionGate('s1', stateDir);
-    assert.equal(shouldBlockCodeWrite('s1', { stateDir, now: 5000, parallelWindowMs: 3000 }), true);
+    const tsDocs = requiredDocsForFile('src/a.ts');
+    const javaDocs = requiredDocsForFile('src/A.java');
+
+    // Claude / Antigravity：超时重试也不放行，必须补齐读取。
+    assert.equal(evaluateWriteGate('c1', tsDocs, { platform: 'claude', stateDir, now: 1000 }).shouldBlock, true);
+    assert.equal(evaluateWriteGate('c1', tsDocs, { platform: 'claude', stateDir, now: 60000 }).shouldBlock, true);
+    recordReadOutcome('c1', { unlocked: ['SKILL.md'], usedSkillTool: true }, stateDir);
+    const missingTs = evaluateWriteGate('c1', tsDocs, { platform: 'claude', stateDir, now: 60000 });
+    assert.equal(missingTs.shouldBlock, true);
+    assert.deepEqual(missingTs.missingGroups, [['languages/typescript.md']]);
+
+    recordReadOutcome('c1', { unlocked: ['languages/typescript.md'] }, stateDir);
+    assert.equal(evaluateWriteGate('c1', tsDocs, { platform: 'claude', stateDir }).shouldBlock, false);
+
+    // 切去改 Java 只要求补读 java.md。
+    assert.deepEqual(evaluateWriteGate('c1', javaDocs, { platform: 'claude', stateDir }).missingGroups, [
+      ['languages/java.md']
+    ]);
+
+    // Claude Code 压缩后保留经 Skill 工具加载的 SKILL.md，清掉语言规则。
+    resetSessionGate('c1', stateDir, { wasCompacted: true });
+    assert.deepEqual(evaluateWriteGate('c1', tsDocs, { platform: 'claude', stateDir }).missingGroups, [
+      ['languages/typescript.md']
+    ]);
+
+    // 未经 Skill 工具加载（如仅用 Read）压缩后需全部重读。
+    recordReadOutcome('c2', { unlocked: ['SKILL.md', 'languages/typescript.md'], usedSkillTool: false }, stateDir);
+    resetSessionGate('c2', stateDir, { wasCompacted: true });
+    assert.deepEqual(evaluateWriteGate('c2', tsDocs, { platform: 'claude', stateDir }).missingGroups, [
+      ['SKILL.md'],
+      ['languages/typescript.md']
+    ]);
+
+    // Codex：检测到截断读取时永不自动放行。
+    recordReadOutcome('x1', { truncated: ['SKILL.md'] }, stateDir, 1000);
+    assert.equal(evaluateWriteGate('x1', tsDocs, { platform: 'codex', stateDir, now: 1000 }).shouldBlock, true);
+    assert.equal(evaluateWriteGate('x1', tsDocs, { platform: 'codex', stateDir, now: 20000 }).shouldBlock, true);
+    assert.equal(evaluateWriteGate('x1', tsDocs, { platform: 'codex', stateDir, now: 40000 }).shouldBlock, true);
+
+    // Codex 无截断时，必须至少拦下 2 次且间隔 >= 10s 才兜底放行。
+    assert.equal(evaluateWriteGate('x2', tsDocs, { platform: 'codex', stateDir, now: 1000 }).shouldBlock, true);
+    assert.equal(evaluateWriteGate('x2', tsDocs, { platform: 'codex', stateDir, now: 4000 }).shouldBlock, true);
+    assert.equal(evaluateWriteGate('x2', tsDocs, { platform: 'codex', stateDir, now: 12000 }).shouldBlock, false);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
 });
 
-test('Claude Code 拦截首次与并行源码写入，非源码和临时脚本不拦，SessionStart 后重置门禁', () => {
-  const sessionId = `cs-claude-${process.pid}-${Date.now()}`;
-  const md = runHook({ hook_event_name: 'PreToolUse', session_id: sessionId, tool_name: 'Write', tool_input: { file_path: 'README.md' } });
-  assert.equal(md.status, 0);
-  assert.equal(md.stderr, '');
+test('检测本机旧版 Hook 配置（已配 PreToolUse 但缺少 PostToolUse）', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-stale-'));
+  try {
+    assert.equal(isStaleHookConfig('claude', home), false);
+    assert.equal(isStaleHookConfig('agy', home), false);
 
-  const tmpScript = runHook({
-    hook_event_name: 'PreToolUse',
-    session_id: sessionId,
-    tool_name: 'Write',
-    tool_input: { file_path: path.join(os.tmpdir(), 'scratch.ts') }
-  });
-  assert.equal(tmpScript.status, 0);
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.claude', 'settings.json'),
+      JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Edit', hooks: [{ command: 'node "x/coding-standards-hook.mjs"' }] }] } })
+    );
+    assert.equal(isStaleHookConfig('claude', home), true);
 
-  const codeInput = { hook_event_name: 'PreToolUse', session_id: sessionId, tool_name: 'Edit', tool_input: { file_path: 'src/a.ts' } };
-  const first = runHook(codeInput);
-  assert.equal(first.status, 2);
-  assert.match(first.stderr, /用 Skill 工具调用 coding-standards 技能/);
+    fs.writeFileSync(
+      path.join(home, '.claude', 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [{ matcher: 'Edit', hooks: [{ command: 'node "x/coding-standards-hook.mjs"' }] }],
+          PostToolUse: [{ matcher: 'Read', hooks: [{ command: 'node "x/coding-standards-hook.mjs"' }] }]
+        }
+      })
+    );
+    assert.equal(isStaleHookConfig('claude', home), false);
 
-  // 紧接着的并行写入仍在 PARALLEL_WINDOW_MS 内，继续拦截。
-  const parallel = runHook(codeInput);
-  assert.equal(parallel.status, 2);
-
-  const compact = runHook({ hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId });
-  assert.equal(compact.status, 0);
-  assert.equal(compact.stdout, '');
-
-  const afterCompact = runHook(codeInput);
-  assert.equal(afterCompact.status, 2);
-  assert.match(afterCompact.stderr, /上下文刚压缩过/);
+    fs.mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.gemini', 'config', 'hooks.json'),
+      JSON.stringify({
+        'lam-dev-skills': { PreToolUse: [{ matcher: 'edit_file', hooks: [{ command: 'node "x/coding-standards-hook.mjs"' }] }] }
+      })
+    );
+    assert.equal(isStaleHookConfig('agy', home), true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
-test('Codex 压缩后仍要求完整读取技能', () => {
+test('Claude Code 端到端：提前读齐首次即放行，斜杠命令解锁 SKILL.md，截断不解锁，压缩保留 Skill 正文', () => {
+  const sessionId = `cs-claude-${process.pid}-${Date.now()}`;
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-claude-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-home-'));
+  const env = { HOME: home, USERPROFILE: home };
+  try {
+    fs.mkdirSync(path.join(repo, '.project-memory', 'standards'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.project-memory', 'standards', 'coding.md'), '# coding');
+
+    const md = runHook({
+      hook_event_name: 'PreToolUse',
+      session_id: sessionId,
+      cwd: repo,
+      tool_name: 'Write',
+      tool_input: { file_path: 'README.md' }
+    }, env);
+    assert.equal(md.status, 0);
+
+    // 开工前先通过 Skill + Read 读齐全部规范（包括项目 coding.md），首次写入直接放行。
+    runHook({ hook_event_name: 'PostToolUse', session_id: sessionId, tool_name: 'Skill', tool_input: { skill: 'coding-standards' } }, env);
+    runHook({
+      hook_event_name: 'PostToolUse',
+      session_id: sessionId,
+      tool_name: 'Read',
+      tool_input: { file_path: 'C:/Users/x/.claude/skills/coding-standards/references/languages/typescript.md' }
+    }, env);
+    runHook({
+      hook_event_name: 'PostToolUse',
+      session_id: sessionId,
+      tool_name: 'Read',
+      tool_input: { file_path: path.join(repo, '.project-memory', 'standards', 'coding.md') }
+    }, env);
+
+    const tsWrite = {
+      hook_event_name: 'PreToolUse',
+      session_id: sessionId,
+      cwd: repo,
+      tool_name: 'Edit',
+      tool_input: { file_path: 'src/a.ts' }
+    };
+    assert.equal(runHook(tsWrite, env).status, 0);
+
+    // 压缩后保留 Skill 加载的 SKILL.md，只拦 typescript.md 和项目 coding.md。
+    assert.equal(runHook({ hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId }, env).status, 0);
+    const afterCompact = runHook(tsWrite, env);
+    assert.equal(afterCompact.status, 2);
+    assert.match(afterCompact.stderr, /上下文刚压缩过/);
+    assert.match(afterCompact.stderr, /references\/languages\/typescript\.md/);
+    assert.match(afterCompact.stderr, /\.project-memory\/standards\/coding\.md/);
+
+    // 新会话通过 /coding-standards 解锁 SKILL.md，但截断 Read 不解锁 typescript.md。
+    const slashSession = `${sessionId}-slash`;
+    runHook({ hook_event_name: 'UserPromptSubmit', session_id: slashSession, prompt: '/coding-standards 改下 a.go' }, env);
+    assert.equal(
+      runHook({
+        hook_event_name: 'PreToolUse',
+        session_id: slashSession,
+        tool_name: 'Edit',
+        tool_input: { file_path: 'main.go' }
+      }, env).status,
+      0
+    );
+    const truncated = runHook({
+      hook_event_name: 'PostToolUse',
+      session_id: slashSession,
+      tool_name: 'Read',
+      tool_input: { file_path: 'C:/skills/coding-standards/references/languages/typescript.md', limit: 10 }
+    }, env);
+    assert.match(JSON.parse(truncated.stdout).hookSpecificOutput.additionalContext, /截断读取/);
+    assert.equal(
+      runHook({
+        hook_event_name: 'PreToolUse',
+        session_id: slashSession,
+        tool_name: 'Edit',
+        tool_input: { file_path: 'src/a.ts' }
+      }, env).status,
+      2
+    );
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('Codex 端到端：$coding-standards 不解锁，Bash 完整读取解锁，压缩后全部重读', () => {
   const sessionId = `cs-codex-${process.pid}-${Date.now()}`;
-  runHook({ hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId });
-  const result = runHook({
+  const writeTs = {
     hook_event_name: 'PreToolUse',
     session_id: sessionId,
     tool_name: 'apply_patch',
     tool_input: patch('*** Update File: src/a.ts', '@@', '+const x = 1;')
+  };
+  assert.equal(runHook(writeTs).status, 2);
+
+  runHook({
+    hook_event_name: 'PostToolUse',
+    session_id: sessionId,
+    tool_name: 'Bash',
+    tool_input: { command: 'cat ~/.codex/skills/coding-standards/SKILL.md ~/.codex/skills/coding-standards/references/languages/typescript.md' }
   });
-  assert.equal(result.status, 2);
-  assert.match(result.stderr, /必须先完整读取 coding-standards 技能/);
-  assert.doesNotMatch(result.stderr, /Skill 工具/);
+  assert.equal(runHook(writeTs).status, 0);
+
+  runHook({ hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId });
+  const afterCompact = runHook(writeTs);
+  assert.equal(afterCompact.status, 2);
+  assert.match(afterCompact.stderr, /coding-standards\/SKILL\.md/);
+  assert.match(afterCompact.stderr, /references\/languages\/typescript\.md/);
+  assert.doesNotMatch(afterCompact.stderr, /Skill 工具/);
 });
 
-test('Antigravity 排除文档和临时脚本，拦截首次与并行源码写入，SessionStart 后重置门禁', () => {
+test('Antigravity 端到端：排除非源码和临时脚本，PostToolUse(read_file) 完整读取后放行，SessionStart 重置', () => {
   const conversationId = `cs-agy-${process.pid}-${Date.now()}`;
-  const docEdit = runHook({ conversationId, toolCall: { name: 'edit_file', args: { Path: 'README.md' } } });
-  assert.equal(docEdit.status, 0);
-  assert.deepEqual(JSON.parse(docEdit.stdout), { decision: 'allow' });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-agy-'));
+  const env = { HOME: home, USERPROFILE: home };
+  try {
+    const xmlEdit = runHook({ conversationId, toolCall: { name: 'edit_file', args: { Path: 'AndroidManifest.xml' } } }, env);
+    assert.deepEqual(JSON.parse(xmlEdit.stdout), { decision: 'allow' });
 
-  const tmpEdit = runHook({
-    conversationId,
-    toolCall: { name: 'write_file', args: { Path: path.join(os.tmpdir(), 'analyze.py') } }
-  });
-  assert.deepEqual(JSON.parse(tmpEdit.stdout), { decision: 'allow' });
+    const tmpEdit = runHook({
+      conversationId,
+      toolCall: { name: 'write_file', args: { Path: path.join(os.tmpdir(), 'analyze.py') } }
+    }, env);
+    assert.deepEqual(JSON.parse(tmpEdit.stdout), { decision: 'allow' });
 
-  const codeInput = { conversationId, toolCall: { name: 'edit_file', args: { Path: 'src/a.ts' } } };
-  const first = runHook(codeInput);
-  assert.equal(first.status, 0);
-  const firstOut = JSON.parse(first.stdout);
-  assert.equal(firstOut.decision, 'deny');
-  assert.match(firstOut.reason, /编码与注释规范门禁/);
-  assert.doesNotMatch(firstOut.reason, /Skill 工具/);
+    const codeInput = { conversationId, toolCall: { name: 'edit_file', args: { Path: 'src/a.ts' } } };
+    const first = JSON.parse(runHook(codeInput, env).stdout);
+    assert.equal(first.decision, 'deny');
+    assert.match(first.reason, /coding-standards\/SKILL\.md/);
+    assert.match(first.reason, /references\/languages\/typescript\.md/);
+    assert.doesNotMatch(first.reason, /Skill 工具/);
 
-  // 紧接着的并行写入仍在 PARALLEL_WINDOW_MS 内，继续拦截。
-  assert.equal(JSON.parse(runHook(codeInput).stdout).decision, 'deny');
+    // 截断或失败的 read_file 不解锁。
+    assert.deepEqual(
+      JSON.parse(
+        runHook({
+          conversationId,
+          hookEventName: 'PostToolUse',
+          toolCall: { name: 'read_file', args: { Path: 'C:/skills/coding-standards/SKILL.md', StartLine: 1, EndLine: 50 } }
+        }, env).stdout
+      ),
+      {}
+    );
+    assert.deepEqual(
+      JSON.parse(
+        runHook({
+          conversationId,
+          hookEventName: 'PostToolUse',
+          toolCall: { name: 'read_file', args: { Path: 'C:/skills/coding-standards/references/languages/typescript.md' } },
+          error: 'ENOENT'
+        }, env).stdout
+      ),
+      {}
+    );
+    assert.equal(JSON.parse(runHook(codeInput, env).stdout).decision, 'deny');
 
-  const reset = runHook({ conversationId, workspacePaths: ['.'] });
-  assert.equal(reset.status, 0);
-  assert.deepEqual(JSON.parse(reset.stdout), {});
+    // 完整读取后放行。
+    runHook({
+      conversationId,
+      hookEventName: 'PostToolUse',
+      toolCall: { name: 'read_file', args: { Path: 'C:/skills/coding-standards/SKILL.md' } }
+    }, env);
+    runHook({
+      conversationId,
+      hookEventName: 'PostToolUse',
+      toolCall: { name: 'read_file', args: { Path: 'C:/skills/coding-standards/references/languages/typescript.md' } }
+    }, env);
+    assert.deepEqual(JSON.parse(runHook(codeInput, env).stdout), { decision: 'allow' });
+
+    // SessionStart 重置门禁。
+    assert.deepEqual(JSON.parse(runHook({ conversationId, workspacePaths: ['.'] }, env).stdout), {});
+    assert.equal(JSON.parse(runHook(codeInput, env).stdout).decision, 'deny');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('输入不是 JSON 时报错但不拦截', () => {

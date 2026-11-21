@@ -6,6 +6,11 @@
       "statusMessage": "Resetting coding standards gate"
     },
     {
+      "event": "UserPromptSubmit",
+      "platforms": ["claude"],
+      "statusMessage": "Checking coding standards invocation"
+    },
+    {
       "event": "PreToolUse",
       "matcher": {
         "claude": "Write|Edit|MultiEdit|NotebookEdit",
@@ -13,6 +18,15 @@
         "agy": "write_file|edit_file"
       },
       "statusMessage": "Checking coding standards"
+    },
+    {
+      "event": "PostToolUse",
+      "matcher": {
+        "claude": "Skill|Read",
+        "codex": "Bash",
+        "agy": "read_file"
+      },
+      "statusMessage": "Tracking coding standards reads"
     }
   ]
 }
