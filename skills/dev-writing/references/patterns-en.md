@@ -29,10 +29,11 @@ When one of these appears, look for a plainer word. Terms defined in the project
 
 ## Register and tone
 
-After removing corporate fluff, aim for concise, accurate technical prose:
+After removing corporate fluff, do not swing into chatty slang:
 
-- **Developer docs**: Use concise, standard technical prose. Keep standard technical terms and API names (e.g., `desktop`, `frontend`, `DocumentProvider`, `mtime`), and use standard table headers and values (e.g., `Scenario`, `Required`, `Yes` / `No`, `Description`).
-- **User docs**: Use plain everyday prose. Replace internal developer jargon with user-facing outcomes (e.g., `restore on failure` instead of `rollback on failure`).
+- **Table headers and enum values** (all docs): Use standard labels such as `Scenario`, `Field`, `Description`, `Action`, `Required`, and `Yes` / `No`.
+- **Developer docs**: Use concise, standard technical prose, keep standard technical terms and API names (e.g., `desktop`, `frontend`, `DocumentProvider`, `file contents`, `mtime`), and use complete phrasing (e.g., `after configuration`, `recorded in`, `enter`).
+- **User docs and UI copy**: Use plain, standard prose across docs and UI strings (buttons, tooltips, empty states, error messages), replacing internal jargon with user-facing outcomes and using standard verbs and states (e.g., `click`, `enabled`, `cannot select`, `Not connected`, `restore on failure`).
 
 ## Examples
 
