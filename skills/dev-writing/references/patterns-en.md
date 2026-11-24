@@ -77,7 +77,7 @@ After removing corporate fluff, do not swing into chatty slang:
 > | Local development | No | Uses the local debug keystore by default |
 > | Release build | Yes | Provide the keystore path and password |
 >
-> **File `ctime` changes after Android SAF reads**
+> **File `ctime` changes after Android SAF reads**  
 > Some DocumentProvider implementations update `ctime` on the first granted read. Compare file contents, size, and `mtime` instead.
 
 ---
