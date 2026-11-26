@@ -22,6 +22,10 @@ import {
 
 const hookScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'coding-standards-hook.mjs');
 
+function toPosixPath(value) {
+  return value.replaceAll('\\', '/');
+}
+
 function runHook(input, env = {}) {
   return spawnSync(process.execPath, [hookScript], {
     input: JSON.stringify(input),
@@ -149,6 +153,40 @@ test('识别三端完整读取、截断读取、失败读取和 Claude 斜杠命
   assert.deepEqual(inspectPromptInvocation('/lam-dev-skills:coding-standards'), ['SKILL.md']);
   assert.deepEqual(inspectPromptInvocation('$coding-standards'), []);
   assert.deepEqual(inspectPromptInvocation('请按 coding-standards 改代码'), []);
+});
+
+test('Claude Code 的 Shell 读取按输出核对：换行宽容，截断、筛选或超限不解锁', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-shell-'));
+  try {
+    const skillDir = path.join(root, 'coding-standards');
+    fs.mkdirSync(path.join(skillDir, 'references', 'languages'), { recursive: true });
+    const skillText = '# 编码规范\r\n\r\n- 第一条\r\n- 第二条\r\n';
+    const tsText = '# TypeScript\n\n- 用 strict\n';
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), skillText);
+    fs.writeFileSync(path.join(skillDir, 'references', 'languages', 'typescript.md'), tsText);
+    const skillPath = toPosixPath(path.join(skillDir, 'SKILL.md'));
+    const lf = (text) => text.replace(/\r\n/g, '\n');
+    const inspect = (command, stdout, options = {}) =>
+      inspectDocReads('Bash', { command }, { toolResponse: { stdout, stderr: '' }, cwd: root, ...options });
+
+    // CRLF 文件经 LF 输出、cd 后的相对路径都能解锁。
+    assert.deepEqual(inspect(`cat "${skillPath}"`, lf(skillText)).unlocked, ['SKILL.md']);
+    assert.deepEqual(
+      inspect('cd coding-standards && cat SKILL.md references/languages/typescript.md', lf(skillText) + tsText).unlocked,
+      ['SKILL.md', 'languages/typescript.md']
+    );
+    // 筛选后的输出、截断命令和超出输出上限都记为截断。
+    assert.deepEqual(inspect(`cat "${skillPath}" | grep 第一条`, '- 第一条\n'), {
+      unlocked: [],
+      truncated: ['SKILL.md'],
+      usedSkillTool: false
+    });
+    assert.deepEqual(inspect(`head -n 2 "${skillPath}"`, '# 编码规范\n\n').truncated, ['SKILL.md']);
+    const overLimit = lf(skillText);
+    assert.deepEqual(inspect(`cat "${skillPath}"`, overLimit, { outputLimit: overLimit.length - 1 }).truncated, ['SKILL.md']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('Claude 与 Antigravity 严格验读放行，Codex 截断不兜底、跨两轮且超时才兜底，压缩保留 Skill 工具状态', () => {

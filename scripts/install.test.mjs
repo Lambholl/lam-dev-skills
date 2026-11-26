@@ -83,7 +83,7 @@ test('install 链接技能、合并 Hook、保留其他配置并先备份；重�
     assert.equal(claude.hooks.PreToolUse[2].matcher, 'Bash|PowerShell');
     assert.match(claude.hooks.PreToolUse[2].hooks[0].command, /^node ".*\/skills\/git-workflow\/scripts\/hooks\/git-workflow-hook\.mjs"$/);
     assert.deepEqual(claude.hooks.PostToolUse.map((group) => group.matcher), [
-      'Skill|Read',
+      'Skill|Read|Bash|PowerShell',
       'Write|Edit|MultiEdit|NotebookEdit'
     ]);
     assert.equal(claude.hooks.SessionStart.length, 2);

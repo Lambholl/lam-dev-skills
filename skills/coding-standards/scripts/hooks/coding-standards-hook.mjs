@@ -69,6 +69,11 @@ const TRUNCATE_COMMAND =
   /(?:^|[|;&(\s])(?:head|tail)(?:\s|$)|(?:^|[|;&(\s])sed\s+-n(?:\s|$)|Select-Object\s+-(?:First|Last)\b|-(?:TotalCount|First|Last|Tail)\b/i;
 const BASH_READ_ERROR =
   /^(?:cat|nl|sed|head|tail|Get-Content): .*(?:No such file|cannot find|Is a directory|Permission denied)/im;
+const CD_COMMAND = /^\s*(?:cd|pushd|Set-Location|sl)\s+("[^"]*"|'[^']*'|\S+)\s*$/i;
+const SHELL_TOKEN = /"([^"]*)"|'([^']*)'|[^\s"'|;&()<>]+/g;
+// Claude Code 的 Bash 工具把超过这个字符数的输出截断后才交给模型，可用环境变量 BASH_MAX_OUTPUT_LENGTH 调整。
+// Hook 收到的 stdout 可能仍是截断前的全文，所以除了比对内容还要按长度判断。
+const CLAUDE_SHELL_OUTPUT_LIMIT = Number(process.env.BASH_MAX_OUTPUT_LENGTH) || 30000;
 
 function toPosix(value) {
   return String(value).replaceAll('\\', '/');
@@ -198,11 +203,86 @@ function isFailedBashResponse(toolResponse) {
   return BASH_READ_ERROR.test(text);
 }
 
+function splitCommandSegments(command) {
+  return command.replace(/\r\n/g, '\n').split(/\n|;|&&|\|\|/);
+}
+
+function unquote(value) {
+  return value.replace(/^(["'])(.*)\1$/, '$2');
+}
+
+function resolveShellPath(token, baseDir, home) {
+  let value = token.replace(/^(?:~|\$HOME|\$\{HOME\}|\$env:USERPROFILE)(?=$|[/\\])/i, home);
+  // Git Bash 把盘符写成 /d/...，Node 在 Windows 上要换成 D:/... 才能定位文件。
+  if (process.platform === 'win32') value = value.replace(/^\/([a-z])(?=\/|$)/i, (_, drive) => `${drive.toUpperCase()}:`);
+  return path.resolve(baseDir, value);
+}
+
+function splitTextLines(text) {
+  return text.replace(/^\uFEFF/, '').split(/\r\n|\r|\n/).map((line) => line.trimEnd());
+}
+
+/**
+ * 文件的每个非空行都按原顺序出现在输出中时返回 true。
+ * 比较前统一 CRLF、CR 和 LF，并忽略 BOM 和行尾空白；输出行只要以文件行结尾即可，`cat -n`、`nl` 加的行号不影响结果。
+ */
+function isFileContentShown(fileText, outputText) {
+  const outputLines = splitTextLines(outputText);
+  let cursor = 0;
+  for (const line of splitTextLines(fileText)) {
+    if (!line) continue;
+    while (cursor < outputLines.length && !outputLines[cursor].endsWith(line)) cursor += 1;
+    if (cursor === outputLines.length) return false;
+    cursor += 1;
+  }
+  return true;
+}
+
+// Claude Code 的 Shell 读取按实际输出核对：命令里出现的规范文件只有内容完整出现在输出里、且输出没有超出 outputLimit 时才算读完。
+function inspectShellOutput(command, toolResponse, { cwd, home, outputLimit }) {
+  const unlocked = new Set();
+  const truncated = new Set();
+  const stdout = toolResponse.stdout;
+  const stderr = String(toolResponse.stderr ?? '');
+  const isOverLimit = stdout.length + stderr.length > outputLimit;
+  let baseDir = path.resolve(cwd ?? process.cwd());
+  for (const segment of splitCommandSegments(command)) {
+    const cd = segment.match(CD_COMMAND);
+    if (cd) {
+      baseDir = resolveShellPath(unquote(cd[1]), baseDir, home);
+      continue;
+    }
+    const isTruncating = TRUNCATE_COMMAND.test(segment);
+    if (!isTruncating && !READ_COMMAND.test(segment)) continue;
+    for (const match of segment.matchAll(SHELL_TOKEN)) {
+      const filePath = resolveShellPath(match[1] ?? match[2] ?? match[0], baseDir, home);
+      const key = docKeyFromPath(filePath);
+      if (!key) continue;
+      let fileText;
+      try {
+        fileText = fs.readFileSync(filePath, 'utf8');
+      } catch {
+        // 命令里写的路径不存在或读不了时，这次调用不可能读到该文件，不记账。
+        continue;
+      }
+      if (!isTruncating && !isOverLimit && isFileContentShown(fileText, stdout)) unlocked.add(key);
+      else truncated.add(key);
+    }
+  }
+  for (const doc of unlocked) truncated.delete(doc);
+  return { unlocked: [...unlocked], truncated: [...truncated], usedSkillTool: false };
+}
+
 /**
  * 检查一次读取工具调用是否完整读取了 coding-standards 规范或项目 standards/coding.md。
- * 返回本次解锁的规范键、被截断的规范键，以及是否经 Claude Code Skill 工具加载。
+ * 返回本次解锁的规范键、未能确认完整读取（截断命令、输出超限或输出与文件不一致）的规范键，以及是否经 Claude Code Skill 工具加载。
+ * Claude Code 的 Bash 和 PowerShell 结果（toolResponse 带 stdout）按 cwd 解析命令里的相对路径，并按 outputLimit 判断输出是否被截断。
  */
-export function inspectDocReads(toolName, toolInput, { toolResponse, toolError } = {}) {
+export function inspectDocReads(
+  toolName,
+  toolInput,
+  { toolResponse, toolError, cwd, home = os.homedir(), outputLimit = CLAUDE_SHELL_OUTPUT_LIMIT } = {}
+) {
   const unlocked = new Set();
   const truncated = new Set();
   let usedSkillTool = false;
@@ -239,8 +319,9 @@ export function inspectDocReads(toolName, toolInput, { toolResponse, toolError }
     if (!/(?:coding-standards|standards[/\\]coding\.md)/i.test(command)) {
       return { unlocked: [], truncated: [], usedSkillTool: false };
     }
-    const segments = command.replace(/\r\n/g, '\n').split(/\n|;|&&|\|\|/);
-    for (const segment of segments) {
+    if (typeof toolResponse?.stdout === 'string') return inspectShellOutput(command, toolResponse, { cwd, home, outputLimit });
+    // Codex 的读取结果没有可核对的 stdout，只按命令文本判断。
+    for (const segment of splitCommandSegments(command)) {
       const normalized = toPosix(segment);
       const docs = new Set();
       if (/(?:^|[\s"'/=])(?:[^\s"'=]*\/)?coding-standards\/SKILL\.md(?=$|[\s"'|;)])/i.test(normalized) ||
@@ -407,13 +488,15 @@ function buildBlockMessage(missingGroups, { platform, state, isStaleConfig = fal
     `读完后重试本次写入即可放行${staleNote}；批量改完源码、报告完成或提交前，按技能“注释自检”核对 git diff HEAD 及新建源码文件的全部注释（可按文件筛选，禁止截断）。`;
 
   if (platform === 'claude') {
+    const howToRead =
+      '用 Read（不传 offset/limit）或 Bash 的 cat 完整读取（禁止用 head、tail、sed -n、grep 等截断或筛选，单次输出超过 Bash 输出上限时分开读）';
     if (state.wasCompacted && state.usedSkillTool) {
-      return `编码与注释规范门禁（coding-standards 技能）：上下文刚压缩过。通过 Skill 工具调用过的 coding-standards 正文若已重新注入上下文可免重读（找不到时先用 Skill 工具调用它）；压缩不保留细则和项目约定，必须先用 Read 完整读取 ${list}（禁止传 offset/limit 截断）。${footer}`;
+      return `编码与注释规范门禁（coding-standards 技能）：上下文刚压缩过。通过 Skill 工具调用过的 coding-standards 正文若已重新注入上下文可免重读（找不到时先用 Skill 工具调用它）；压缩不保留细则和项目约定，必须先${howToRead} ${list}。${footer}`;
     }
     if (needsSkill) {
-      return `编码与注释规范门禁（coding-standards 技能）：修改源码前尚未完整加载 ${list}。请先用 Skill 工具调用 coding-standards（或用 Read 完整读取 coding-standards/SKILL.md），并用 Read 完整读取其余缺失文件（禁止传 offset/limit 截断）。${footer}`;
+      return `编码与注释规范门禁（coding-standards 技能）：修改源码前尚未完整加载 ${list}。请先用 Skill 工具调用 coding-standards（或完整读取 coding-standards/SKILL.md），其余缺失文件${howToRead}。${footer}`;
     }
-    return `编码与注释规范门禁（coding-standards 技能）：修改源码前尚未完整读取 ${list}。请先用 Read 完整读取上述文件（禁止传 offset/limit 截断）。${footer}`;
+    return `编码与注释规范门禁（coding-standards 技能）：修改源码前尚未完整读取 ${list}。请先${howToRead}上述文件。${footer}`;
   }
 
   const prefix = state.wasCompacted ? '上下文刚压缩过，必须重新完整读取' : '修改源码前尚未完整读取';
@@ -425,7 +508,7 @@ function buildBlockMessage(missingGroups, { platform, state, isStaleConfig = fal
 
 function buildTruncatedReminder(truncatedDocs) {
   const list = truncatedDocs.map(formatDocName).join('、');
-  return `检测到截断读取规范（${list}），门禁未解锁：禁止用 head、tail、sed -n 或 limit/offset 截断读取技能和规范文件，请完整读取（或用 Skill 工具加载 coding-standards）后再修改源码。`;
+  return `检测到截断读取规范（${list}），门禁未解锁：用了 head、tail、sed -n 或 limit/offset 等截断方式，或者输出被筛选、编码不对、超出 Bash 输出上限而没有显示完整文件。请完整读取（多个文件输出过长时分开读，或用 Skill 工具加载 coding-standards）后再修改源码。`;
 }
 
 /**
@@ -536,7 +619,7 @@ async function main() {
   }
 
   if (input.hook_event_name === 'PostToolUse') {
-    const outcome = inspectDocReads(input.tool_name, input.tool_input ?? {}, { toolResponse: input.tool_response });
+    const outcome = inspectDocReads(input.tool_name, input.tool_input ?? {}, { toolResponse: input.tool_response, cwd: input.cwd });
     recordReadOutcome(sessionId, outcome);
     if (outcome.truncated.length) {
       process.stdout.write(

@@ -22,7 +22,7 @@
     {
       "event": "PostToolUse",
       "matcher": {
-        "claude": "Skill|Read",
+        "claude": "Skill|Read|Bash|PowerShell",
         "codex": "Bash",
         "agy": "read_file"
       },
