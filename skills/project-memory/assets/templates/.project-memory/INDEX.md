@@ -25,7 +25,7 @@ tags: [索引]
 | 目标、术语、路线图 | `project/` |
 | 需求、范围、约束、开放问题 | `requirements/` |
 | 架构、接口、数据流、决定 | `architecture/`、`decisions/` |
-| 实现、代码位置、已知问题、风险 | `development/` |
+| 实现、工作包、代码位置、已知问题、风险 | `development/` |
 | 写或改代码 | `standards/coding.md`，以及 `development/code-map.md` 里相关路径的约定 |
 | 测试、验收 | `standards/testing.md`、`testing/` |
 | 写文档 | `standards/writing.md`、`project/glossary.md` |

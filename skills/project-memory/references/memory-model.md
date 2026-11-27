@@ -9,7 +9,7 @@
 | `requirements/` | 产品需求、范围、约束、开放问题、变更请求 |
 | `architecture/` | 架构、模块关系、数据流、接口、外部依赖 |
 | `decisions/` | 仍然有效的长期技术和产品决定（ADR） |
-| `development/` | 代码地图、模块状态、实现要点、已知问题、风险 |
+| `development/` | 代码地图、工作包、模块状态、实现要点、已知问题、风险 |
 | `testing/` | 测试用例、验收标准、覆盖缺口、回归状态 |
 | `standards/` | 项目对写作、提交、编码、测试规范的差异 |
 
@@ -59,5 +59,5 @@ tags: [认证, 接口]
 
 - `updated` 用 Asia/Shanghai 的 `YYYY-MM-DD`，改正文时更新。
 - `tags` 显示在 INDEX 的文档目录里。
-- 带编号的登记表另加 `id_prefix` 和 `id_high_water`。
+- 带编号的登记表另加 `id_prefix` 和 `id_high_water`，编号不复用。
 - 状态可以按领域增加，含义写在项目的 `standards/writing.md` 里。

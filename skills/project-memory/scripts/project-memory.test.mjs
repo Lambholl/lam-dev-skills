@@ -55,6 +55,7 @@ test('init 建出的记忆目录和 AGENTS.md 通过校验，已有文件不覆�
     assert.equal(created.status, 0);
     const index = fs.readFileSync(path.join(memory, 'INDEX.md'), 'utf8');
     assert.match(index, /\| `requirements\/product.md` \| 产品需求 \| draft \| 需求 \|/);
+    assert.match(index, /\| `development\/work-packages.md` \| 工作包登记 \| active \| 工作包 \|/);
     assert.doesNotMatch(index, /ADR-0001-template/);
     assert.doesNotMatch(fs.readFileSync(path.join(memory, 'project', 'charter.md'), 'utf8'), /\{\{TODAY\}\}/);
     const agents = fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8');
